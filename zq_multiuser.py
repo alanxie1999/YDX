@@ -4224,255 +4224,45 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
 
     next_sequence = int(rt.get("bet_sequence_count", 0) or 0) + 1
     history_signature = "".join(str(x) for x in state.history[-12:])
-    stat_fallback_enabled = _is_stat_fallback_bet_enabled(user_ctx)
-    rt["stat_fallback_bet_enabled"] = stat_fallback_enabled
-
-    predict_started_at = time.monotonic()
-    try:
-        prediction = await asyncio.wait_for(
-            predict_next_bet_core(user_ctx, global_config),
-            timeout=predict_timeout_sec,
-        )
-        predict_ms = int((time.monotonic() - predict_started_at) * 1000)
-    except asyncio.TimeoutError:
-        predict_ms = int((time.monotonic() - predict_started_at) * 1000)
-        prediction = int(fallback_prediction(state.history)) if stat_fallback_enabled else -1
-        rt["last_predict_source"] = "timeout_fallback" if stat_fallback_enabled else "timeout_wait"
-        rt["last_predict_tag"] = "TIMEOUT_FALLBACK"
-        rt["last_predict_confidence"] = 0
-        rt["last_predict_reason"] = "模型预测超时" if stat_fallback_enabled else "模型链不可用，等待恢复"
-        rt["last_predict_info"] = _build_predict_basis_text(
-            history=state.history,
-            prediction=int(prediction),
-            source=rt["last_predict_source"],
-            pattern_tag="TIMEOUT_FALLBACK",
-            rhythm_tag="CHAOS_NOISE",
-            tail_streak_len=int(rt.get("last_predict_tail_len", 0) or 0),
-            tail_streak_char=rt.get("last_predict_tail_char", None),
-        )
-        _queue_model_notice(
-            rt,
-            "failure",
-            signature=f"timeout|{rt.get('current_model_id', 'unknown')}",
-            from_model=str(rt.get("current_model_id", "unknown")),
-            detail="模型预测超时，已改用统计兜底。" if stat_fallback_enabled else "模型预测超时，已等待模型恢复。",
-        )
-
-    if prediction not in (-1, 0, 1):
-        prediction = int(fallback_prediction(state.history)) if stat_fallback_enabled else -1
-        rt["last_predict_source"] = "invalid_fallback" if stat_fallback_enabled else "invalid_wait"
-        rt["last_predict_tag"] = "INVALID_FALLBACK"
-        rt["last_predict_confidence"] = 0
-        rt["last_predict_reason"] = "模型返回无效结果" if stat_fallback_enabled else "模型链不可用，等待恢复"
-        rt["last_predict_info"] = _build_predict_basis_text(
-            history=state.history,
-            prediction=int(prediction),
-            source=rt["last_predict_source"],
-            pattern_tag="INVALID_FALLBACK",
-            rhythm_tag="CHAOS_NOISE",
-            tail_streak_len=int(rt.get("last_predict_tail_len", 0) or 0),
-            tail_streak_char=rt.get("last_predict_tail_char", None),
-        )
-        _queue_model_notice(
-            rt,
-            "failure",
-            signature=f"invalid|{rt.get('current_model_id', 'unknown')}",
-            from_model=str(rt.get("current_model_id", "unknown")),
-            detail="模型返回无效结果，已改用统计兜底。" if stat_fallback_enabled else "模型返回无效结果，已等待模型恢复。",
-        )
-
-    current_predict_source = str(rt.get("last_predict_source", "") or "").strip()
-    if current_predict_source in {"timeout_fallback", "invalid_fallback", "hard_fallback", "timeout_wait", "invalid_wait", "hard_wait"}:
-        _mark_model_failure(rt, current_predict_source, rt.get("last_predict_info", "模型已改用统计兜底。"))
-    elif current_predict_source and current_predict_source not in {"unlock_fallback"}:
-        if str(rt.get("model_health_status", "")).strip().lower() not in {"switched"}:
-            rt["model_health_status"] = "ok"
-        rt["model_fallback_streak"] = 0
-        rt["model_pause_notified"] = False
-
-    if int(rt.get("model_fallback_streak", 0) or 0) >= MODEL_FALLBACK_PAUSE_THRESHOLD:
-        rt["model_health_status"] = "down"
-        rt["model_pause_active"] = True
-        if not rt.get("model_pause_notified", False):
-            _queue_model_notice(
-                rt,
-                "pause",
-                signature=f"pause|{rt.get('current_model_id', 'unknown')}|{rt.get('model_fallback_streak', 0)}",
-                from_model=str(rt.get("current_model_id", "unknown")),
-                detail=str(rt.get("model_last_fail_reason", "") or "连续多次统计兜底"),
-            )
-            rt["model_pause_notified"] = True
-
-    await _flush_model_runtime_notice(client, user_ctx, global_config)
-    if int(rt.get("model_fallback_streak", 0) or 0) > 0 or rt.get("model_pause_active", False):
-        _ensure_model_probe_loop(client, user_ctx, global_config)
-
-    if int(rt.get("model_fallback_streak", 0) or 0) >= MODEL_FALLBACK_PAUSE_THRESHOLD:
-        _clear_alternation_break_runtime(rt)
-        _clear_fixed_pattern_runtime(rt)
-        pause_reason = "模型连续兜底暂停" if stat_fallback_enabled else "模型连续异常暂停"
-        _enter_pause(rt, MODEL_FALLBACK_PAUSE_ROUNDS, pause_reason)
-        rt["bet"] = False
-        rt["bet_on"] = False
-        rt["mode_stop"] = True
-        user_ctx.save_state()
-        return
-
-    if current_predict_source in MODEL_WAIT_SOURCES:
-        _emit_bet_timing(
-            "model_wait",
-            timing_sequence=int(next_sequence),
-            timing_predict_source=str(rt.get("last_predict_source", "")),
-        )
-        rt["bet"] = False
-        rt["bet_on"] = True
-        rt["mode_stop"] = True
-        user_ctx.save_state()
-        await _send_transient_admin_notice(
-            client,
-            user_ctx,
-            global_config,
-            _build_ops_card(
-                "⏸️ 本局等待模型恢复",
-                summary="当前模型链不可用，本局未执行下注。",
-                fields=[
-                    ("当前模型", str(rt.get("current_model_id", "unknown") or "unknown")),
-                    ("最近异常", str(rt.get("model_last_fail_reason", "") or "模型链未返回可用结果")),
-                ],
-                note="系统会继续后台探测模型恢复情况。",
-            ),
-            ttl_seconds=120,
-            attr_name="model_wait_notice_message",
-            msg_type="info",
-        )
-        return
-
-    prediction = _apply_alternation_break_override(
-        rt,
-        incoming_history if incoming_history else state.history,
-        prediction,
-        order="near_to_far",
-    )
-
-    prediction = _apply_fixed_pattern_override(
-        rt,
-        incoming_history if incoming_history else state.history,
-        prediction,
-    )
-
-    if prediction == -1:
-        skip_trigger = _record_hand_stall_block(rt, next_sequence, history_signature, "skip")
-        if skip_trigger.get("force_unlock", False):
-            prediction = _prepare_force_unlock_prediction(state, rt, next_sequence, skip_trigger)
-            log_event(
-                logging.WARNING,
-                'bet_on',
-                '低手位连续观望触发保守解锁',
-                user_id=user_ctx.user_id,
-                category='warning',
-                **_build_runtime_chain_diag(
-                    rt,
-                    state,
-                    next_sequence=next_sequence,
-                    stall_skip_streak=int(skip_trigger.get("skip_streak", 0) or 0),
-                    stall_total=int(skip_trigger.get("no_bet_streak", 0) or 0),
-                    unlocked_prediction=int(prediction),
-                ),
-            )
-            await _send_transient_admin_notice(
-                client,
-                user_ctx,
-                global_config,
-                _build_ops_card(
-                    "🔓 低手位连续观望，已保守解锁",
-                    summary="当前处于低手位，同一手位已连续多次观望，本局改用统计兜底继续下注。",
-                    fields=[
-                        ("当前手位", f"{next_sequence} 手"),
-                        ("连续观望", f"{int(skip_trigger.get('skip_streak', 0) or 0)} 次"),
-                        ("兜底方向", "大" if int(prediction) == 1 else "小"),
-                    ],
-                ),
-                ttl_seconds=120,
-                attr_name="skip_reason_message",
-                msg_type="info",
-            )
-        elif int(skip_trigger.get("pause_rounds", 0) or 0) > 0:
-            pause_rounds = max(1, int(skip_trigger.get("pause_rounds", 0) or 0))
-            pause_reason = str(skip_trigger.get("pause_reason", "") or "连续观望暂停").strip()
-            _emit_bet_timing(
-                "skip_pause",
-                timing_sequence=int(next_sequence),
-                timing_predict_source=str(rt.get("last_predict_source", "")),
-            )
-            _enter_pause(rt, pause_rounds, pause_reason)
-            _clear_hand_stall_guard(rt)
-            user_ctx.save_state()
-            await _send_transient_admin_notice(
-                client,
-                user_ctx,
-                global_config,
-                _build_ops_card(
-                    "🟡 高手位连续观望，已自动暂停" if next_sequence >= STALL_GUARD_HIGH_STEP_MIN else "🟡 低手位连续观望，已自动暂停",
-                    summary="为避免在高风险手位强行下注，系统已自动暂停 1 局并等待下一次判断。" if next_sequence >= STALL_GUARD_HIGH_STEP_MIN else "低手位已经保守解锁过一次，本次继续观望后已自动暂停 1 局。",
-                    fields=[
-                        ("当前手位", f"{next_sequence} 手"),
-                        ("连续观望", f"{int(skip_trigger.get('skip_streak', 0) or 0)} 次"),
-                        ("处理结果", f"已自动暂停 {pause_rounds} 局"),
-                    ],
-                ),
-                ttl_seconds=120,
-                attr_name="skip_reason_message",
-                msg_type="info",
-            )
-            return
+    history = state.history
+    
+    # 简单跟随策略：跟随上一手结果下注
+    # 检测 6 位纯交替模式（10101 或 01010）
+    if len(history) >= 5:
+        last_5 = "".join(str(x) for x in history[-5:])
+        if last_5 in ("10101", "01010"):
+            # 6 位纯交替，下注与上一手相反（打破交替）
+            prediction = 1 - history[-1]
+            rt["last_predict_source"] = "alternation_break"
+            rt["last_predict_tag"] = "ALTERNATION_BREAK"
+            rt["last_predict_confidence"] = 100
+            rt["last_predict_reason"] = "6 位纯交替，按反向下注"
         else:
-            _emit_bet_timing(
-                "skip",
-                timing_sequence=int(next_sequence),
-                timing_predict_source=str(rt.get("last_predict_source", "")),
-            )
-            if _verbose_runtime_diag_enabled():
-                log_event(
-                    logging.INFO,
-                    'bet_on',
-                    '模型返回观望，本局跳过',
-                    user_id=user_ctx.user_id,
-                    category='runtime',
-                    **_build_runtime_chain_diag(
-                        rt,
-                        state,
-                        predict_source=str(rt.get("last_predict_source", "")),
-                        predict_tag=str(rt.get("last_predict_tag", "")),
-                        predict_confidence=int(rt.get("last_predict_confidence", 0) or 0),
-                        next_bet_amount=bet_amount,
-                        next_sequence=next_sequence,
-                        stall_skip_streak=int(skip_trigger.get("skip_streak", 0) or 0),
-                        stall_total=int(skip_trigger.get("no_bet_streak", 0) or 0),
-                    ),
-                )
-            rt["bet"] = False
-            rt["bet_on"] = True
-            rt["mode_stop"] = True
-            user_ctx.save_state()
-            await _send_transient_admin_notice(
-                client,
-                user_ctx,
-                global_config,
-                _build_ops_card(
-                    "⏭️ 本局策略选择观望",
-                    summary="当前模型判断不建议下注，本局已主动跳过。",
-                    fields=[
-                        ("当前手位", f"{next_sequence} 手"),
-                        ("连续观望", f"{int(skip_trigger.get('skip_streak', 0) or 0)} 次"),
-                        ("", rt.get("last_predict_info", "模型未给出可执行信号")),
-                    ],
-                ),
-                ttl_seconds=120,
-                attr_name="skip_reason_message",
-                msg_type="info",
-            )
-            return
-
+            # 正常跟随上一手
+            prediction = history[-1]
+            rt["last_predict_source"] = "follow_last"
+            rt["last_predict_tag"] = "FOLLOW_TREND"
+            rt["last_predict_confidence"] = 50
+            rt["last_predict_reason"] = "跟随上一手结果"
+    elif len(history) > 0:
+        # 历史不足 5 手，直接跟随最后一手
+        prediction = history[-1]
+        rt["last_predict_source"] = "follow_last"
+        rt["last_predict_tag"] = "FOLLOW_TREND"
+        rt["last_predict_confidence"] = 50
+        rt["last_predict_reason"] = "跟随上一手结果"
+    else:
+        # 没有历史数据，默认下大
+        prediction = 1
+        rt["last_predict_source"] = "default"
+        rt["last_predict_tag"] = "DEFAULT"
+        rt["last_predict_confidence"] = 50
+        rt["last_predict_reason"] = "无历史数据，默认下大"
+    
+    rt["last_predict_info"] = f"预测方向：{'大' if prediction == 1 else '小'} - {rt['last_predict_reason']}"
+    
+    # 简单策略总是执行下注，直接进入下注执行流程
+    
     await _notify_ai_key_warning_if_needed(client, user_ctx, global_config)
 
     planned_bet_amount = int(bet_amount)
