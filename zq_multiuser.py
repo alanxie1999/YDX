@@ -4155,13 +4155,33 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
     if bet_amount <= 0:
         if not rt.get("limit_stop_notified", False):
             lose_stop = int(rt.get("lose_stop", 13))
+            lose_count = int(rt.get("lose_count", 0))
             mes = (
                 "⚠️ 已达到预设连投上限，已自动暂停\n"
                 f"当前预设最多连投：{lose_stop} 手\n"
-                "可等待新轮次或切换预设后继续"
+                f"当前连输：{lose_count} 手\n"
+                "等待 10 局后将用首注金额重新开始"
             )
             await send_to_admin(client, mes, user_ctx, global_config)
             rt["limit_stop_notified"] = True
+            
+            # 设置暂停 10 局，并从首注重新开始
+            rt["stop_count"] = 10
+            rt["bet_sequence_count"] = 0
+            rt["bet_amount"] = int(rt.get("initial_amount", 500))
+            rt["lose_count"] = 0
+            rt["win_count"] = 0
+            rt["earnings"] = rt.get("earnings", 0) + profit if 'profit' in locals() else rt.get("earnings", 0)
+            
+            _enter_pause(rt, 10, "连输止损暂停，10 局后重置首注")
+            log_event(
+                logging.INFO,
+                'bet_on',
+                '连输止损已暂停，10 局后重置',
+                user_id=user_ctx.user_id,
+                data=f"lose_count={lose_count}, 将在 10 局后用首注 {int(rt.get('initial_amount', 500))} 重新开始"
+            )
+        
         log_event(
             logging.WARNING,
             'bet_on',
