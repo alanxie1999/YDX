@@ -4247,19 +4247,19 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
     history = state.history
     
     # 简单跟随策略：跟随上一手结果下注
-    # 检测 6 位纯交替模式（10101 或 01010）
+    # 检测 5 位纯交替模式（10101 或 01010）
     log_event(logging.INFO, 'bet_on', '策略诊断', user_id=user_ctx.user_id, 
               data=f"历史：{history[-10:]}, 最后一手：{history[-1] if history else '无'}")
     
     if len(history) >= 5:
         last_5 = "".join(str(x) for x in history[-5:])
         if last_5 in ("10101", "01010"):
-            # 6 位纯交替，下注与上一手相反（打破交替）
+            # 5 位纯交替，下注与上一手相反（打破交替）
             prediction = 1 - history[-1]
             rt["last_predict_source"] = "alternation_break"
             rt["last_predict_tag"] = "ALTERNATION_BREAK"
             rt["last_predict_confidence"] = 100
-            rt["last_predict_reason"] = f"6 位纯交替{last_5}，反向下注{'大' if prediction == 1 else '小'}"
+            rt["last_predict_reason"] = f"5 位纯交替{last_5}，反向下注{'大' if prediction == 1 else '小'}"
             log_event(logging.INFO, 'bet_on', '交替打破', user_id=user_ctx.user_id,
                       data=f"last_5={last_5}, history[-1]={history[-1]}, prediction={prediction}")
         else:
