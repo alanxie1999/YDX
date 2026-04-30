@@ -286,12 +286,13 @@ HIGH_STEP_DOUBLE_CONFIRM_MIN_CONF = 70
 HIGH_STEP_DOUBLE_CONFIRM_PAUSE_ROUNDS = 2
 HIGH_STEP_DOUBLE_CONFIRM_MODEL_TIMEOUT_SEC = 5.0
 
-# 纯交替增强：当最近盘口“由近到远”出现 6 位纯交替时，
+# 纯交替增强（旧版 AI 模型逻辑，已废弃）：当最近盘口“由近到远”出现 6 位纯交替时，
+# 注：当前简单跟随策略使用 5 位检测（10101/01010），在第 5 注后反向打破
 # 主脚本强制按最新一手同向下注，尝试结束交替。
 ALTERNATION_BREAK_TRIGGER_WINDOW = 6
 ALTERNATION_BREAK_PATTERNS = {"010101", "101010"}
 
-# 固定数据规律：检测到特定 6 位序列后，按照规律下注
+# 固定数据规律（旧版 AI 模型逻辑，已废弃）：检测到特定 6 位序列后，按照规律下注
 FIXED_PATTERN_TRIGGER_WINDOW = 6
 FIXED_PATTERNS = {
     "010101": {"follow": "reverse", "label": "交替循环反转"},  # 按最新一手反向下注
