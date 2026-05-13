@@ -4154,7 +4154,7 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
         user_ctx.save_state()
         return
 
-    bet_amount = calculate_bet_amount(rt)
+    bet_amount = calculate_bet_amount(rt, state.history)
     if bet_amount <= 0:
         lose_stop = int(rt.get("lose_stop", 13))
         if not rt.get("limit_stop_notified", False):
@@ -4744,7 +4744,7 @@ def _resolve_click_timeout_sec(base_timeout_sec: float, combination_len: int) ->
     return timeout_sec
 
 
-def calculate_bet_amount(rt: dict) -> int:
+def calculate_bet_amount(rt: dict, history: list = None) -> int:
     """按 master 逻辑计算本局下注金额。"""
     win_count = rt.get("win_count", 0)
     lose_count = rt.get("lose_count", 0)
@@ -4755,8 +4755,11 @@ def calculate_bet_amount(rt: dict) -> int:
     lose_three = float(rt.get("lose_three", 2.1))
     lose_four = float(rt.get("lose_four", 2.05))
 
+    dragon_extra = _get_dragon_extra_bet_amount(rt, history)
+
     if win_count >= 0 and lose_count == 0:
-        return constants.closest_multiple_of_500(initial_amount)
+        base = constants.closest_multiple_of_500(initial_amount)
+        return base + dragon_extra
 
     if (lose_count + 1) > lose_stop:
         return 0
@@ -4772,7 +4775,37 @@ def calculate_bet_amount(rt: dict) -> int:
         target = base_amount * lose_four
 
     # 与 master 一致：补 1% 安全边际
-    return constants.closest_multiple_of_500(target + target * 0.01)
+    base = constants.closest_multiple_of_500(target + target * 0.01)
+    return base + dragon_extra
+
+
+def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
+    """6连以上长龙期间，每次下注额外加250000，直到不中后停止。"""
+    if rt.get("lose_count", 0) > 0:
+        rt["dragon_extra_active"] = False
+        rt["dragon_tail_streak"] = 0
+        return 0
+
+    if history is None:
+        history = rt.get("_history_cache", [])
+    else:
+        rt["_history_cache"] = history
+
+    if not isinstance(history, list) or len(history) < 6:
+        rt["dragon_extra_active"] = False
+        return 0
+
+    streak, _ = _get_history_tail_streak(history)
+
+    if streak >= 6:
+        rt["dragon_extra_active"] = True
+        rt["dragon_tail_streak"] = streak
+        return 250000
+
+    if rt.get("dragon_extra_active", False):
+        return 250000
+
+    return 0
 
 
 def _build_pause_resume_hint(rt: dict) -> str:

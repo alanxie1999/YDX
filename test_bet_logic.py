@@ -15,138 +15,116 @@ ALTERNATION_BREAK_TRIGGER_WINDOW = 6
 ALTERNATION_BREAK_PATTERNS = {"010101", "101010"}
 
 
-def detect_fixed_pattern(history, window=FIXED_PATTERN_TRIGGER_WINDOW):
-    """检测固定数据序列信号"""
-    if not isinstance(history, list) or len(history) < window:
-        return {"active": False}
+def _get_history_tail_streak(history):
+    """返回历史尾部连庄信息：(连庄长度, 连庄方向0/1)。"""
+    if not isinstance(history, list) or not history:
+        return 0, -1
+    try:
+        tail_value = int(history[-1])
+    except Exception:
+        return 0, -1
+    streak = 1
+    for idx in range(len(history) - 2, -1, -1):
+        try:
+            current = int(history[idx])
+        except Exception:
+            break
+        if current != tail_value:
+            break
+        streak += 1
+    return streak, tail_value
 
-    near_to_far = [int(x) for x in history[-window:]]
-    seq = "".join(str(x) for x in near_to_far)
 
-    if seq not in FIXED_PATTERNS:
-        return {"active": False}
+def _get_dragon_extra_bet_amount(rt, history=None):
+    """6连以上长龙期间，每次下注额外加250000，直到不中后停止。"""
+    if rt.get("lose_count", 0) > 0:
+        rt["dragon_extra_active"] = False
+        rt["dragon_tail_streak"] = 0
+        return 0
 
-    pattern_info = FIXED_PATTERNS[seq]
-    follow_pattern = pattern_info["follow"]
-    label = pattern_info["label"]
-    latest_value = int(near_to_far[-1])
-
-    if follow_pattern == "reverse":
-        prediction = 1 - latest_value
-    elif len(follow_pattern) == 1:
-        prediction = int(follow_pattern)
+    if history is None:
+        history = rt.get("_history_cache", [])
     else:
-        prediction = latest_value
+        rt["_history_cache"] = history
 
-    return {
-        "active": True,
-        "detected_seq": seq,
-        "window": window,
-        "follow_pattern": follow_pattern,
-        "label": label,
-        "prediction": prediction,
-    }
+    if not isinstance(history, list) or len(history) < 6:
+        rt["dragon_extra_active"] = False
+        return 0
 
+    streak, _ = _get_history_tail_streak(history)
 
-def detect_alternation_break(history, window=ALTERNATION_BREAK_TRIGGER_WINDOW):
-    """检测纯交替信号"""
-    if not isinstance(history, list) or len(history) < window:
-        return {"active": False}
+    if streak >= 6:
+        rt["dragon_extra_active"] = True
+        rt["dragon_tail_streak"] = streak
+        return 250000
 
-    near_to_far = [int(x) for x in history[-window:]]
-    seq = "".join(str(x) for x in near_to_far)
+    if rt.get("dragon_extra_active", False):
+        return 250000
 
-    if seq not in ALTERNATION_BREAK_PATTERNS:
-        return {"active": False}
-
-    latest_value = int(near_to_far[-1])
-    prediction = latest_value  # 同向
-
-    return {
-        "active": True,
-        "detected_seq": seq,
-        "label": "纯交替同向",
-        "prediction": prediction,
-    }
+    return 0
 
 
-def simulate_bet(history_sequence, description=""):
-    """模拟下注过程"""
+def simulate_dragon_extra(history_sequence, description=""):
+    """模拟长龙额外加注逻辑"""
     print(f"\n{'='*60}")
     print(f"测试: {description}")
     print(f"{'='*60}")
     print(f"历史序列: {' '.join(str(x) for x in history_sequence)}")
-
+    
+    rt = {"lose_count": 0, "dragon_extra_active": False}
+    
     for i in range(len(history_sequence)):
         current_history = history_sequence[:i]
         next_actual = history_sequence[i]
-
-        fixed_signal = detect_fixed_pattern(current_history)
-        alt_signal = detect_alternation_break(current_history)
-
-        prediction = None
-        trigger_type = None
-
-        if fixed_signal.get("active"):
-            prediction = fixed_signal["prediction"]
-            trigger_type = f"固定规律({fixed_signal['label']})"
-        elif alt_signal.get("active"):
-            prediction = alt_signal["prediction"]
-            trigger_type = f"交替增强({alt_signal['label']})"
-
-        if prediction is not None:
-            match = "✓" if prediction == next_actual else "✗"
-            pred_text = "大(1)" if prediction == 1 else "小(0)"
-            actual_text = "大(1)" if next_actual == 1 else "小(0)"
-            print(f"  第{i+1}手: 检测最近{len(current_history[-5:])}位 -> 预测{pred_text}, 实际{actual_text} {match} [{trigger_type}]")
+        
+        extra = _get_dragon_extra_bet_amount(rt, current_history)
+        streak, side = _get_history_tail_streak(current_history)
+        
+        if extra > 0:
+            print(f"  第{i+1}手: 尾连{streak} -> 额外加注+250000 [龙尾方向{'大' if side==1 else '小'}]")
         else:
-            print(f"  第{i+1}手: 无触发, 实际开出{'大(1)' if next_actual == 1 else '小(0)'}")
+            print(f"  第{i+1}手: 尾连{streak} -> 无额外加注")
+        
+        # 模拟结果：如果预测错误，设置 lose_count > 0
+        # 这里假设我们预测与龙尾同向
+        if streak >= 6:
+            prediction = side
+            if prediction != next_actual:
+                rt["lose_count"] = 1
+                print(f"         -> 预测错误，停止额外加注")
 
 
 # 测试用例
-print("下注逻辑模拟测试")
+print("长龙额外加注逻辑模拟测试")
 print("="*60)
 
-# 测试 1: 00101 反向下注
-simulate_bet([0, 0, 1, 0, 1, 0], "00101 触发反向下注（应预测 0）")
+# 测试 1: 6连大后额外加注
+simulate_dragon_extra([0, 1, 0, 1, 1, 1, 1, 1, 1, 1], "6连大后额外加注")
 
-# 测试 2: 11010 反向下注
-simulate_bet([1, 1, 0, 1, 0, 1], "11010 触发反向下注（应预测 1）")
+# 测试 2: 7连小后额外加注
+simulate_dragon_extra([1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0], "7连小后额外加注")
 
-# 测试 3: 010101 交替同向
-simulate_bet([0, 1, 0, 1, 0, 1, 1], "010101 交替同向（应预测 1）")
-
-# 测试 4: 101010 交替同向
-simulate_bet([1, 0, 1, 0, 1, 0, 0], "101010 交替同向（应预测 0）")
-
-# 测试 5: 混合场景
+# 测试 3: 长龙中断后停止加注
 print(f"\n{'='*60}")
-print("测试: 混合场景 - 00101 反向 + 后续演变")
+print("测试: 长龙中断后停止加注")
 print(f"{'='*60}")
-history = [0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1]
+history = [1, 1, 1, 1, 1, 1, 1, 0, 1, 1]  # 7连大后断掉
+rt = {"lose_count": 0, "dragon_extra_active": False}
 for i in range(len(history)):
     current_history = history[:i]
     next_actual = history[i]
-
-    fixed_signal = detect_fixed_pattern(current_history)
-    alt_signal = detect_alternation_break(current_history)
-
-    prediction = None
-    trigger_type = None
-
-    if fixed_signal.get("active"):
-        prediction = fixed_signal["prediction"]
-        trigger_type = f"固定规律({fixed_signal['label']})"
-    elif alt_signal.get("active"):
-        prediction = alt_signal["prediction"]
-        trigger_type = f"交替增强({alt_signal['label']})"
-
-    if prediction is not None:
-        match = "✓" if prediction == next_actual else "✗"
-        pred_text = "大(1)" if prediction == 1 else "小(0)"
-        actual_text = "大(1)" if next_actual == 1 else "小(0)"
-        seq_str = ''.join(str(x) for x in current_history[-6:])
-        print(f"  第{i+1}手: [{seq_str}] -> 预测{pred_text}, 实际{actual_text} {match} [{trigger_type}]")
+    
+    extra = _get_dragon_extra_bet_amount(rt, current_history)
+    streak, side = _get_history_tail_streak(current_history)
+    
+    if extra > 0:
+        print(f"  第{i+1}手: [{ ''.join(str(x) for x in current_history[-8:]) }] 尾连{streak} -> 额外加注+250000")
     else:
-        seq_str = ''.join(str(x) for x in current_history[-6:]) if len(current_history) >= 6 else ''.join(str(x) for x in current_history)
-        print(f"  第{i+1}手: [{seq_str}] -> 无触发, 实际{'大(1)' if next_actual == 1 else '小(0)'}")
+        reason = "龙尾不足6连" if streak < 6 else "已中断"
+        print(f"  第{i+1}手: [{ ''.join(str(x) for x in current_history[-8:]) }] 尾连{streak} -> 无额外加注 ({reason})")
+    
+    if streak >= 6:
+        prediction = side
+        if prediction != next_actual:
+            rt["lose_count"] = 1
+            print(f"         -> 预测错误，后续停止加注")
