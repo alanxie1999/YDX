@@ -293,7 +293,6 @@ ALTERNATION_BREAK_TRIGGER_WINDOW = 6
 ALTERNATION_BREAK_PATTERNS = {"010101", "101010"}
 
 # 固定数据规律：检测到特定序列后，按照规律下注
-FIXED_PATTERN_TRIGGER_WINDOW = 5
 FIXED_PATTERNS = {
     "010101": {"follow": "reverse", "label": "交替循环反转"},  # 按最新一手反向下注
     "101010": {"follow": "reverse", "label": "交替循环反转"},  # 按最新一手反向下注
@@ -301,6 +300,8 @@ FIXED_PATTERNS = {
     "000000": {"follow": "0", "label": "小龙延续"},
     "00101": {"follow": "reverse", "label": "00101反向下注"},
     "11010": {"follow": "reverse", "label": "11010反向下注"},
+    "001010": {"follow": "same", "label": "001010同向下注"},
+    "110101": {"follow": "same", "label": "110101同向下注"},
 }
 
 # 同手位防卡死：避免 SKIP/超时导致长期不落单
@@ -2921,42 +2922,43 @@ def _clear_alternation_break_runtime(rt: dict) -> None:
 
 def _detect_fixed_pattern_signal(
     history: list,
-    window: int = FIXED_PATTERN_TRIGGER_WINDOW,
 ) -> Dict[str, Any]:
-    """识别固定数据序列信号，并给出相应的下注方向。"""
-    if not isinstance(history, list) or len(history) < int(window):
+    """识别固定数据序列信号，并给出相应的下注方向。支持不同长度的模式。"""
+    if not isinstance(history, list) or len(history) < 5:
         return {"active": False}
 
-    near_to_far = [int(x) for x in history[-int(window):]]
-    seq = "".join(str(x) for x in near_to_far)
-    
-    if seq not in FIXED_PATTERNS:
-        return {"active": False}
+    history_str = "".join(str(x) for x in history)
 
-    pattern_info = FIXED_PATTERNS[seq]
-    follow_pattern = pattern_info["follow"]
-    label = pattern_info["label"]
-    
-    latest_value = int(near_to_far[-1])  # 最新一手
-    
-    if follow_pattern == "reverse":
-        # 反向下注：与最新一手相反
-        prediction = 1 - latest_value
-    elif len(follow_pattern) == 1:
-        # 固定方向下注
-        prediction = int(follow_pattern)
-    else:
-        # 默认按最新一手同向
-        prediction = latest_value
-    
-    return {
-        "active": True,
-        "detected_seq": seq,
-        "window": int(window),
-        "follow_pattern": follow_pattern,
-        "label": label,
-        "prediction": prediction,
-    }
+    for pattern, config in FIXED_PATTERNS.items():
+        pattern_len = len(pattern)
+        if len(history) < pattern_len:
+            continue
+
+        recent_seq = history_str[-pattern_len:]
+        if recent_seq == pattern:
+            follow_pattern = config["follow"]
+            label = config["label"]
+            latest_value = int(history[-1])
+
+            if follow_pattern == "reverse":
+                prediction = 1 - latest_value
+            elif follow_pattern == "same":
+                prediction = latest_value
+            elif len(follow_pattern) == 1:
+                prediction = int(follow_pattern)
+            else:
+                prediction = latest_value
+
+            return {
+                "active": True,
+                "detected_seq": recent_seq,
+                "window": pattern_len,
+                "follow_pattern": follow_pattern,
+                "label": label,
+                "prediction": prediction,
+            }
+
+    return {"active": False}
 
 
 def _apply_fixed_pattern_override(
@@ -2964,7 +2966,7 @@ def _apply_fixed_pattern_override(
     history: list,
     prediction: int,
 ) -> int:
-    """在固定数据盘面里，按照检测到的规律下注（010101/101010 反向下注，111111/000000 延续下注）。"""
+    """在固定数据盘面里，按照检测到的规律下注。"""
     signal = _detect_fixed_pattern_signal(history)
     if not signal.get("active", False):
         return int(prediction)
@@ -2974,17 +2976,18 @@ def _apply_fixed_pattern_override(
     detected_seq = str(signal.get("detected_seq", ""))
     label = str(signal.get("label", "固定规律"))
     follow_pattern = str(signal.get("follow_pattern", ""))
-    near_to_far = [int(x) for x in history[-6:]]
-    latest_value = int(near_to_far[-1])  # 最新一手
-    
+    latest_value = int(history[-1]) if history else 0
+
     # 构建原因说明
     if follow_pattern == "reverse":
         latest_side = "大" if latest_value == 1 else "小"
         predict_side = "小" if latest_side == "大" else "大"
         reason_text = f"检测到{label}（{detected_seq}），反向下注{predict_side}"
+    elif follow_pattern == "same":
+        reason_text = f"检测到{label}（{detected_seq}），同向下注{side_text}"
     else:
         reason_text = f"检测到{label}（{detected_seq}），按照规律下注{side_text}"
-    
+
     rt["fixed_pattern_active"] = True
     rt["fixed_pattern_seq"] = detected_seq
     rt["fixed_pattern_side"] = side_text
