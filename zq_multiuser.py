@@ -292,15 +292,15 @@ HIGH_STEP_DOUBLE_CONFIRM_MODEL_TIMEOUT_SEC = 5.0
 ALTERNATION_BREAK_TRIGGER_WINDOW = 6
 ALTERNATION_BREAK_PATTERNS = {"010101", "101010"}
 
-# 固定数据规律：检测到特定 6 位序列后，按照规律下注
-FIXED_PATTERN_TRIGGER_WINDOW = 6
+# 固定数据规律：检测到特定序列后，按照规律下注
+FIXED_PATTERN_TRIGGER_WINDOW = 5
 FIXED_PATTERNS = {
     "010101": {"follow": "reverse", "label": "交替循环反转"},  # 按最新一手反向下注
     "101010": {"follow": "reverse", "label": "交替循环反转"},  # 按最新一手反向下注
     "111111": {"follow": "1", "label": "大龙延续"},
     "000000": {"follow": "0", "label": "小龙延续"},
-    "001010": {"follow": "same", "label": "001010同向延续"},
-    "110101": {"follow": "same", "label": "110101同向延续"},
+    "00101": {"follow": "reverse", "label": "00101反向下注"},
+    "11010": {"follow": "reverse", "label": "11010反向下注"},
 }
 
 # 同手位防卡死：避免 SKIP/超时导致长期不落单
