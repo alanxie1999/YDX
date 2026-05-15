@@ -1,5 +1,7 @@
 """
 更新与发布管理模块
+版本：2.4.6
+日期：2026-05-15
 
 功能：
 - 查询当前版本与最新 GitHub Release
@@ -261,7 +263,8 @@ def _git_fetch_tags(root: Path, remote_name: str, github_token: str = "") -> sub
     token = (github_token or "").strip()
     if token:
         cmd += ["-c", f"http.extraheader={_build_git_auth_header(token)}"]
-    cmd += ["fetch", "--force", "--tags", remote_name]
+    # 添加 --prune 清理已删除的远程标签，避免产生过多临时引用
+    cmd += ["fetch", "--force", "--tags", "--prune", remote_name]
     return _run_cmd(cmd, root, timeout=120)
 
 
@@ -875,12 +878,59 @@ def update_to_release(repo_root: Optional[str] = None, target_tag: Optional[str]
         return lock
 
     try:
+        # 初始检查：阻止更新前已有变更
         blocking = get_blocking_dirty_paths(root)
         if blocking:
             return {
                 "success": False,
                 "error": "存在未提交代码变更，已阻止更新",
                 "blocking_paths": blocking,
+            }
+
+        current = get_current_repo_info(root)
+        remote = detect_repo_remote(root)
+        remote_name = remote.get("name", "")
+        repo_slug = remote.get("slug", "")
+        github_token = resolve_github_token(root, remote.get("url", ""))
+
+        final_tag = (target_tag or "").strip()
+        latest = None
+        if not final_tag:
+            if not repo_slug:
+                return {
+                    "success": False,
+                    "error": "无法识别 GitHub 仓库地址 (remote.origin.url)",
+                    "detail": "请检查 git 远程配置，例如：git remote add origin https://github.com/<owner>/<repo>.git",
+                }
+            if remote_name:
+                fetch_res = _git_fetch_tags(root, remote_name, github_token)
+                if fetch_res.returncode != 0:
+                    return {
+                        "success": False,
+                        "error": f"git fetch --tags {remote_name} 失败",
+                        "detail": (fetch_res.stderr or fetch_res.stdout).strip()[:600],
+                    }
+            latest = get_latest_release(repo_slug, github_token=github_token)
+            if not latest.get("success"):
+                return {"success": False, "error": latest.get("error", "获取最新 release 失败")}
+            final_tag = latest.get("tag_name", "").strip()
+        elif remote_name:
+            # 指定版本时，先 fetch tags 再 fetch main 分支
+            fetch_tags_res = _git_fetch_tags(root, remote_name, github_token)
+            fetch_main_res = _run_cmd(["git", "fetch", remote_name, "main"], root, timeout=120)
+            # tags 和 main 都允许失败，后续会尝试验证本地 ref
+            if fetch_tags_res.returncode != 0 and fetch_main_res.returncode != 0:
+                pass  # 不立即返回错误，继续尝试验证本地 ref
+        
+        # fetch 后再次检查：git fetch 可能产生 FETCH_HEAD 等临时状态，但不应该产生 dirty
+        # 如果 fetch 后出现 dirty，说明真的有未提交变更
+        blocking_after_fetch = get_blocking_dirty_paths(root)
+        if blocking_after_fetch:
+            return {
+                "success": False,
+                "error": "fetch 后检测到未提交代码变更，已阻止更新",
+                "blocking_paths": blocking_after_fetch,
+                "hint": "请先执行 git stash 或 git commit 保存变更，然后再试",
             }
 
         current = get_current_repo_info(root)
@@ -973,12 +1023,46 @@ def update_to_ref(repo_root: Optional[str] = None, target_ref: Optional[str] = N
         return lock
 
     try:
+        # 初始检查
         blocking = get_blocking_dirty_paths(root)
         if blocking:
             return {
                 "success": False,
                 "error": "存在未提交代码变更，已阻止更新",
                 "blocking_paths": blocking,
+            }
+
+        final_ref = (target_ref or "").strip()
+        if not final_ref:
+            return {"success": False, "error": "请提供目标 ref（commit/tag/branch）"}
+
+        current = get_current_repo_info(root)
+        remote = detect_repo_remote(root)
+        remote_name = remote.get("name", "")
+        github_token = resolve_github_token(root, remote.get("url", ""))
+
+        if remote_name:
+            # fetch main 分支和 tags
+            fetch_main_res = _run_cmd(["git", "fetch", remote_name, "main"], root, timeout=120)
+            fetch_tag_res = _git_fetch_tags(root, remote_name, github_token)
+            # 允许 fetch 失败，后续会尝试验证本地 ref
+            if fetch_main_res.returncode != 0 and fetch_tag_res.returncode != 0:
+                verify_local = _run_cmd(["git", "rev-parse", "--verify", f"{final_ref}^{{commit}}"], root, timeout=20)
+                if verify_local.returncode != 0:
+                    return {
+                        "success": False,
+                        "error": f"无法解析目标 ref: {final_ref}",
+                        "hint": "请确认该 commit/tag/branch 存在于远程仓库",
+                    }
+        
+        # fetch 后再次检查 dirty 状态
+        blocking_after_fetch = get_blocking_dirty_paths(root)
+        if blocking_after_fetch:
+            return {
+                "success": False,
+                "error": "fetch 后检测到未提交代码变更",
+                "blocking_paths": blocking_after_fetch,
+                "hint": "请先执行 git stash 保存变更，或执行 git reset --hard 清除变更",
             }
 
         final_ref = (target_ref or "").strip()
