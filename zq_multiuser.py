@@ -1,8 +1,7 @@
 """
-zq_multiuser.py - 多用户版本核心逻辑
-版本：2.4.6
-日期：2026-05-15
-功能：多用户押注、结算、命令处理
+zq_multiuser.py - 多用户投注脚本（固定金额模式 + 倍投模式）
+版本：2.4.7
+日期：2026-05-16
 """
 
 import logging
@@ -4904,7 +4903,7 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
 
 
 def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
-    """6连以上长龙期间，每次下注额外加500000，直到不中后停止。"""
+    """6 连以上长龙期间，每次下注额外加 1000000，直到不中后停止。"""
     if rt.get("lose_count", 0) > 0:
         rt["dragon_extra_active"] = False
         rt["dragon_tail_streak"] = 0
@@ -4912,6 +4911,29 @@ def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
         rt["forced_bet_remaining"] = 0
         rt["forced_bet_direction"] = 0
         return 0
+
+    if history is None:
+        history = rt.get("_current_history", [])
+        if not history:
+            history = rt.get("_history_cache", [])
+    else:
+        rt["_history_cache"] = history
+
+    if not isinstance(history, list) or len(history) < 6:
+        rt["dragon_extra_active"] = False
+        return 0
+
+    streak, _ = _get_history_tail_streak(history)
+
+    if streak >= 6:
+        rt["dragon_extra_active"] = True
+        rt["dragon_tail_streak"] = streak
+        return 1000000
+
+    if rt.get("dragon_extra_active", False):
+        return 1000000
+
+    return 0
 
     if history is None:
         history = rt.get("_current_history", [])
