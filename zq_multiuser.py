@@ -1,6 +1,6 @@
 """
 zq_multiuser.py - 多用户投注脚本（固定金额模式 + 倍投模式）
-版本：2.4.7
+版本：2.4.8
 日期：2026-05-16
 """
 
@@ -7818,18 +7818,50 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                         action="建议执行 `status` 确认当前状态，再等待下一次盘口。",
                     )
                     log_event(logging.INFO, 'user_cmd', '重置押注策略', user_id=user_ctx.user_id, action='completed')
+                elif my[1] == "config":
+                    # 清除所有下注配置参数，恢复默认预设
+                    from constants import PRESETS
+                    default_preset = PRESETS["5k"]
+                    rt["continuous"] = int(default_preset[0])
+                    rt["lose_stop"] = int(default_preset[1])
+                    rt["lose_once"] = float(default_preset[2])
+                    rt["lose_twice"] = float(default_preset[3])
+                    rt["lose_three"] = float(default_preset[4])
+                    rt["lose_four"] = float(default_preset[5])
+                    rt["initial_amount"] = int(default_preset[6])
+                    rt["bet_direction"] = default_preset[7] if len(default_preset) > 7 else "auto"
+                    rt["auto_pause_count"] = int(default_preset[8]) if len(default_preset) > 8 else 0
+                    rt["current_preset_name"] = "5k"
+                    rt["win_count"] = 0
+                    rt["lose_count"] = 0
+                    rt["bet_sequence_count"] = 0
+                    rt["bet_amount"] = int(rt.get("initial_amount", 500))
+                    _clear_lose_recovery_tracking(rt)
+                    user_ctx.save_state()
+                    mes = _build_ops_card(
+                        "✅ 下注配置已清除",
+                        summary="所有下注参数已重置为默认预设 5k。",
+                        fields=[
+                            ("初始金额", rt.get('initial_amount', 500)),
+                            ("连输停止", rt.get('lose_stop', 13)),
+                            ("倍投系数", f"{rt.get('lose_once', 3.0)}/{rt.get('lose_twice', 2.5)}/{rt.get('lose_three', 2.2)}/{rt.get('lose_four', 2.1)}"),
+                            ("方向设定", rt.get('bet_direction', 'auto')),
+                        ],
+                        action="建议执行 `status` 确认当前状态，或使用 `/st <预设名>` 切换到其他预设。",
+                    )
+                    log_event(logging.INFO, 'user_cmd', '清除下注配置', user_id=user_ctx.user_id, action='completed')
                 else:
                     mes = _build_ops_card(
                         "❌ 重置命令无效",
                         summary="当前重置类型无法识别。",
-                        action="可用命令：`res tj`、`res state`、`res bet`。",
+                        action="可用命令：`res tj`、`res state`、`res bet`、`res config`。",
                     )
                     log_event(logging.WARNING, 'user_cmd', '无效重置命令', user_id=user_ctx.user_id, cmd=text)
             else:
                 mes = _build_ops_card(
                     "📌 请选择重置类型",
                     summary="当前没有指定具体要重置的内容。",
-                    action="请执行 `res tj`、`res state` 或 `res bet`。",
+                    action="请执行 `res tj`、`res state`、`res bet` 或 `res config`。",
                 )
             
             message = await send_to_admin(client, mes, user_ctx, global_config)
