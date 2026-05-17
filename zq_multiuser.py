@@ -1,6 +1,6 @@
 """
 zq_multiuser.py - 多用户投注脚本（固定金额模式 + 倍投模式）
-版本：3.0.0
+版本：3.1.0
 日期：2026-05-16
 """
 
@@ -4284,14 +4284,25 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
     log_event(logging.INFO, 'bet_on', '策略诊断', user_id=user_ctx.user_id, 
               data=f"历史：{history[-10:]}, 最后一手：{history[-1] if history else '无'}")
     
-    # 倍投模式：简单跟随策略
+    # 倍投模式：支持同向/交替下注
     if len(history) > 0:
-        prediction = history[-1]
-        rt["last_predict_source"] = "follow_last"
-        rt["last_predict_tag"] = "FOLLOW_TREND"
-        rt["last_predict_confidence"] = 50
-        rt["last_predict_reason"] = f"跟随上一手{history[-1]}，下{'大' if prediction == 1 else '小'}"
-        log_event(logging.INFO, 'bet_on', '跟随策略', user_id=user_ctx.user_id,
+        bet_direction = rt.get("bet_direction", "same")
+        if bet_direction == "reverse":
+            # mt 命令：交替下注（与上一手相反）
+            prediction = 1 - history[-1]
+            rt["last_predict_source"] = "alternation_bet"
+            rt["last_predict_tag"] = "ALTERNATION_BET"
+            rt["last_predict_confidence"] = 100
+            rt["last_predict_reason"] = f"交替下注：与上一手{history[-1]}相反，下{'大' if prediction == 1 else '小'}"
+        else:
+            # st 命令：跟随同向
+            prediction = history[-1]
+            rt["last_predict_source"] = "follow_last"
+            rt["last_predict_tag"] = "FOLLOW_TREND"
+            rt["last_predict_confidence"] = 50
+            rt["last_predict_reason"] = f"跟随上一手{history[-1]}，下{'大' if prediction == 1 else '小'}"
+        log_event(logging.INFO, 'bet_on', '下注策略', user_id=user_ctx.user_id,
+                  data=f"bet_direction={bet_direction}, history[-1]={history[-1]}, prediction={prediction}")
                   data=f"history[-1]={history[-1]}, prediction={prediction}")
     else:
         prediction = 1
@@ -4765,14 +4776,17 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
     lose_twice = float(rt.get("lose_twice", 2.1))
     lose_three = float(rt.get("lose_three", 2.1))
     lose_four = float(rt.get("lose_four", 2.05))
-
+    
+    # 检测长龙/交替第 7 手加注
+    dragon_extra = _get_dragon_or_alternation_extra(rt, history)
+    
     if win_count >= 0 and lose_count == 0:
         base = constants.closest_multiple_of_500(initial_amount)
-        return base
-
+        return base + dragon_extra
+    
     if (lose_count + 1) > lose_stop:
         return 0
-
+    
     base_amount = int(rt.get("bet_amount", initial_amount))
     if lose_count == 1:
         target = base_amount * lose_once
@@ -4782,10 +4796,47 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
         target = base_amount * lose_three
     else:
         target = base_amount * lose_four
-
+    
     # 补 1% 安全边际
     base = constants.closest_multiple_of_500(target + target * 0.01)
-    return base
+    return base + dragon_extra
+
+
+def _get_dragon_or_alternation_extra(rt: dict, history: list = None) -> int:
+    """长龙（111111/000000）或交替（101010/010101）第 7 手加注 100 万，直到不中后恢复。"""
+    if history is None:
+        history = rt.get("_current_history", [])
+        if not history:
+            history = rt.get("_history_cache", [])
+    
+    if not isinstance(history, list) or len(history) < 6:
+        return 0
+    
+    # 检查是否已经触发加注（不中后清除）
+    if rt.get("lose_count", 0) > 0:
+        rt["dragon_extra_active"] = False
+        return 0
+    
+    # 检测长龙：6 连相同
+    streak, last = _get_history_tail_streak(history)
+    if streak >= 6:
+        rt["dragon_extra_active"] = True
+        rt["dragon_type"] = "dragon"
+        return 1000000
+    
+    # 检测交替：101010 或 010101
+    if len(history) >= 6:
+        last_6 = "".join(str(x) for x in history[-6:])
+        if last_6 in ("101010", "010101"):
+            rt["dragon_extra_active"] = True
+            rt["dragon_type"] = "alternation"
+            return 1000000
+    
+    # 持续加注状态（直到不中）
+    if rt.get("dragon_extra_active", False):
+        return 1000000
+    
+    return 0
 
 
 def _build_pause_resume_hint(rt: dict) -> str:
@@ -6399,7 +6450,31 @@ async def _process_settle_slim(client, event, user_ctx: UserContext, global_conf
                 _clear_lose_recovery_tracking(rt)
             elif win:
                 _clear_lose_recovery_tracking(rt)
-
+            
+            # 固定金额模式：连输达到 auto_pause_count 后自动暂停
+            auto_pause_count = int(rt.get("auto_pause_count", 0) or 0)
+            is_fixed_bet = (rt.get("lose_once", 3.0) == 1.0 and rt.get("lose_twice", 2.1) == 1.0 and 
+                            rt.get("lose_three", 2.1) == 1.0 and rt.get("lose_four", 2.05) == 1.0)
+            if not win and is_fixed_bet and auto_pause_count > 0:
+                lose_count = rt.get("lose_count", 0)
+                if lose_count >= auto_pause_count and not rt.get("auto_pause_triggered", False):
+                    rt["auto_pause_triggered"] = True
+                    rt["auto_pause_lose_count"] = lose_count
+                    _enter_pause(rt, auto_pause_count, f"固定金额模式连输{lose_count}局自动暂停")
+                    rt["bet_on"] = False
+                    rt["mode_stop"] = True
+                    
+                    resume_hint = _build_pause_resume_hint(rt)
+                    pause_msg = (
+                        f"⛔ 固定金额模式自动暂停 ⛔\n\n"
+                        f"触发原因：连输{lose_count}局达到暂停阈值\n"
+                        f"暂停局数：{auto_pause_count} 局\n"
+                        f"{resume_hint}"
+                    )
+                    await send_message_v2(client, "pause", pause_msg, user_ctx, global_config)
+                    log_event(logging.INFO, 'settle', '固定金额连输暂停', user_id=user_ctx.user_id,
+                              data=f"连输{lose_count}局，暂停{auto_pause_count}局")
+            
             user_ctx.save_state()
 
             result_amount = _format_money_message(int(bet_amount * 0.99) if win else bet_amount)
@@ -7052,8 +7127,11 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 rt["lose_three"] = float(preset[4])
                 rt["lose_four"] = float(preset[5])
                 rt["initial_amount"] = int(preset[6])
+                rt["auto_pause_count"] = int(preset[7]) if len(preset) > 7 else 0
                 rt["current_preset_name"] = preset_name
                 rt["bet_amount"] = int(preset[6])
+                # st 命令：跟随同向下注
+                rt["bet_direction"] = "same"
                 await _clear_pause_countdown_notice(client, user_ctx)
                 rt["switch"] = True
                 rt["manual_pause"] = False
@@ -7071,7 +7149,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                     summary="当前账号已经切换到新的预设，后续将按这套参数进入可下注状态。",
                     fields=[
                         ("策略参数", f"{preset[0]} {preset[1]} {preset[2]} {preset[3]} {preset[4]} {preset[5]} {preset[6]}"),
-                        ("下注方向", direction_label),
+                        ("下注方向", "跟随同向（st）"),
                     ],
                     action="建议留意本轮自动测算结果，并用 `status` 确认当前状态。",
                 )
@@ -7095,6 +7173,70 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                         "❌ 预设不存在",
                         summary=f"当前账号没有找到名为 `{preset_name}` 的预设。",
                         action="请先执行 `yss` 查看可用预设，或用 `ys` 新建一个预设。",
+                    ),
+                    user_ctx,
+                    global_config,
+                )
+            return
+        
+        # mt - 交替下注（与上一手相反）
+        if cmd == "mt" and len(my) > 1:
+            preset_name = my[1]
+            if preset_name in presets:
+                preset = presets[preset_name]
+                rt["continuous"] = int(preset[0])
+                rt["lose_stop"] = int(preset[1])
+                rt["lose_once"] = float(preset[2])
+                rt["lose_twice"] = float(preset[3])
+                rt["lose_three"] = float(preset[4])
+                rt["lose_four"] = float(preset[5])
+                rt["initial_amount"] = int(preset[6])
+                rt["auto_pause_count"] = int(preset[7]) if len(preset) > 7 else 0
+                rt["current_preset_name"] = preset_name
+                rt["bet_amount"] = int(preset[6])
+                # mt 命令：交替下注（反向）
+                rt["bet_direction"] = "reverse"
+                await _clear_pause_countdown_notice(client, user_ctx)
+                rt["switch"] = True
+                rt["manual_pause"] = False
+                rt["bet_on"] = True
+                rt["mode_stop"] = True
+                rt["bet"] = False
+                rt["risk_deep_triggered_milestones"] = []
+                rt["fund_pause_notified"] = False
+                rt["limit_stop_notified"] = False
+                _clear_lose_recovery_tracking(rt)
+                user_ctx.save_state()
+                 
+                mes = _build_ops_card(
+                    f"🔄 交替下注启动：{preset_name}",
+                    summary="当前账号已经切换到交替下注模式，每局与上一手结果相反。",
+                    fields=[
+                        ("策略参数", f"{preset[0]} {preset[1]} {preset[2]} {preset[3]} {preset[4]} {preset[5]} {preset[6]}"),
+                        ("下注方向", "交替反向（mt）"),
+                    ],
+                    action="建议留意本轮自动测算结果，并用 `status` 确认当前状态。",
+                )
+                log_event(logging.INFO, 'user_cmd', '启动交替下注', user_id=user_ctx.user_id, preset=preset_name)
+                message = await send_to_admin(client, mes, user_ctx, global_config)
+                asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
+                if message:
+                    asyncio.create_task(delete_later(client, message.chat_id, message.id, 10))
+                await yc_command_handler_multiuser(
+                    client,
+                    event,
+                    [preset_name],
+                    user_ctx,
+                    global_config,
+                    auto_trigger=True,
+                )
+            else:
+                await send_to_admin(
+                    client,
+                    _build_ops_card(
+                        "❌ 预设不存在",
+                        summary=f"当前账号没有找到名为 `{preset_name}` 的预设。",
+                        action="请先执行 `yss` 查看可用预设。",
                     ),
                     user_ctx,
                     global_config,
