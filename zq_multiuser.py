@@ -1,6 +1,6 @@
 """
 zq_multiuser.py - 多用户投注脚本（固定金额模式 + 倍投模式）
-版本：3.1.0
+版本：3.2.0
 日期：2026-05-16
 """
 
@@ -4303,7 +4303,6 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
             rt["last_predict_reason"] = f"跟随上一手{history[-1]}，下{'大' if prediction == 1 else '小'}"
         log_event(logging.INFO, 'bet_on', '下注策略', user_id=user_ctx.user_id,
                   data=f"bet_direction={bet_direction}, history[-1]={history[-1]}, prediction={prediction}")
-                  data=f"history[-1]={history[-1]}, prediction={prediction}")
     else:
         prediction = 1
         rt["last_predict_source"] = "default"
@@ -6045,7 +6044,7 @@ def generate_bet_id(user_ctx: UserContext) -> str:
 
 
 def format_bet_id(bet_id):
-    """将押注 ID 转换为直观格式，如 '3月14日第 1 轮第 12 次'。"""
+    """将押注 ID 转换为直观格式，如 '3 月 14 日第 1 轮第 12 次'。"""
     try:
         date_str, round_num, seq_num = str(bet_id).split('_')
         month = int(date_str[4:6])
@@ -6053,6 +6052,53 @@ def format_bet_id(bet_id):
         return f"{month}月{day}日第 {round_num} 轮第 {seq_num} 次"
     except Exception:
         return str(bet_id)
+
+
+def _save_history_to_file(state, rt: dict, win: bool, profit: int, bet_amount: int, prediction: int, result: int):
+    """保存开奖结果历史记录到单独的文件，按日期命名。"""
+    import os
+    
+    # 创建 history 目录
+    history_dir = "/workspace/history"
+    os.makedirs(history_dir, exist_ok=True)
+    
+    # 获取当前日期作为文件名
+    today = datetime.now().strftime("%Y-%m-%d")
+    file_path = os.path.join(history_dir, f"{today}.txt")
+    
+    # 获取当前时间
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # 获取轮次和序号
+    settle_round = int(rt.get("current_round", 1))
+    settle_seq = int(rt.get("current_bet_seq", 1))
+    
+    # 获取方向
+    direction = "大" if prediction == 1 else "小"
+    result_type = "大" if result == 1 else "小"
+    
+    # 获取预设名称
+    preset_name = rt.get("current_preset_name", "未知")
+    
+    # 获取资金信息
+    account_balance = rt.get("account_balance", 0)
+    gambling_fund = rt.get("gambling_fund", 0)
+    
+    # 格式化输赢
+    win_loss = "赢" if win else "输"
+    profit_text = f"+{profit}" if win else str(profit)
+    
+    # 构建记录行
+    record = (
+        f"{timestamp} | {today} | 第{settle_round}轮第{settle_seq}次 | "
+        f"预设:{preset_name} | 方向:{direction} | 金额:{bet_amount} | "
+        f"结果:{result_type} | {win_loss}:{profit_text} | "
+        f"账户:{account_balance/10000:.2f}万 | 菠菜:{gambling_fund/10000:.2f}万\n"
+    )
+    
+    # 追加写入文件
+    with open(file_path, "a", encoding="utf-8") as f:
+        f.write(record)
 
 
 def get_settle_position(state, rt):
@@ -6476,6 +6522,9 @@ async def _process_settle_slim(client, event, user_ctx: UserContext, global_conf
                               data=f"连输{lose_count}局，暂停{auto_pause_count}局")
             
             user_ctx.save_state()
+            
+            # 保存历史记录到文件
+            _save_history_to_file(state, rt, win, profit, bet_amount, prediction, result)
 
             result_amount = _format_money_message(int(bet_amount * 0.99) if win else bet_amount)
             last_bet_id = settled_entry.get("bet_id", "") if isinstance(settled_entry, dict) else ""
