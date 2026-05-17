@@ -1,6 +1,6 @@
 """
 zq_multiuser.py - 多用户投注脚本（固定金额模式 + 倍投模式）
-版本：3.4.3
+版本：3.4.4
 日期：2026-05-17
 """
 
@@ -4826,7 +4826,7 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
 
 
 def _get_dragon_or_alternation_extra(rt: dict, history: list = None) -> int:
-    """长龙（111111/000000）或交替（101010/010101）第 7 手加注 100 万，不中后恢复初始策略。"""
+    """长龙（111111/000000）或交替（101010/010101）第 7 手加注 100 万，输了后恢复初始策略。"""
     if history is None:
         history = rt.get("_current_history", [])
         if not history:
@@ -4835,24 +4835,25 @@ def _get_dragon_or_alternation_extra(rt: dict, history: list = None) -> int:
     if not isinstance(history, list) or len(history) < 6:
         return 0
     
+    # 输了后清除加注标记，恢复初始策略
+    if rt.get("lose_count", 0) > 0:
+        rt["dragon_extra_triggered"] = False
+        return 0
+    
     # 检测长龙：6 连相同
     streak, last = _get_history_tail_streak(history)
     if streak >= 6:
-        # 检查是否已经加注过（通过 dragon_extra_triggered 标记）
-        if not rt.get("dragon_extra_triggered", False):
-            rt["dragon_extra_triggered"] = True
-            rt["dragon_type"] = "dragon"
-            return 1000000
+        rt["dragon_extra_triggered"] = True
+        rt["dragon_type"] = "dragon"
+        return 1000000
     
     # 检测交替：101010 或 010101
     if len(history) >= 6:
         last_6 = "".join(str(x) for x in history[-6:])
         if last_6 in ("101010", "010101"):
-            # 检查是否已经加注过
-            if not rt.get("dragon_extra_triggered", False):
-                rt["dragon_extra_triggered"] = True
-                rt["dragon_type"] = "alternation"
-                return 1000000
+            rt["dragon_extra_triggered"] = True
+            rt["dragon_type"] = "alternation"
+            return 1000000
     
     return 0
 
@@ -6437,13 +6438,6 @@ async def _process_settle_slim(client, event, user_ctx: UserContext, global_conf
             settled_entry["settled_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             active_chain_summary = _summarize_effective_bet_chain(state)
             recent_resolved_summary = _summarize_recent_resolved_chain(state)
-            
-            # 长龙/交替加注后，无论输赢都恢复初始策略
-            if rt.get("dragon_extra_triggered", False):
-                rt["bet_amount"] = int(rt.get("initial_amount", 500))
-                rt["dragon_extra_triggered"] = False
-                rt["dragon_type"] = None
-            
             if not win:
                 rt["bet_sequence_count"] = max(
                     int(active_chain_summary.get("continuous_count", 0)),
