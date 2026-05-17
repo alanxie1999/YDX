@@ -1,6 +1,6 @@
 """
 zq_multiuser.py - 多用户投注脚本（固定金额模式 + 倍投模式）
-版本：3.4.4
+版本：3.4.5
 日期：2026-05-17
 """
 
@@ -1956,7 +1956,7 @@ def _build_help_card() -> str:
         "• <code>/users</code> 查看当前用户信息\n"
         "• <code>/xx</code> 执行辅助数据操作\n\n"
         "<b>📊 历史记录</b>\n"
-        "• 自动保存到 <code>/workspace/history/YYYY-MM-DD.txt</code>\n"
+        "• 自动保存到 <code>/workspace/logs/YYYY-MM-DD.txt</code>\n"
         "<i>每局结算后自动追加，包含方向、金额、输赢、余额等信息</i>\n\n"
         "<b>⚡ 快捷更新流程</b>\n"
         "<code>/update → /restart → /status</code>\n"
@@ -6108,8 +6108,8 @@ def _save_history_to_file(state, rt: dict, win: bool, profit: int, bet_amount: i
     """保存开奖结果历史记录到单独的文件，按日期命名。"""
     import os
     
-    # 创建 history 目录
-    history_dir = "/workspace/history"
+    # 创建 logs 目录
+    history_dir = "/workspace/logs"
     os.makedirs(history_dir, exist_ok=True)
     
     # 获取当前日期作为文件名
