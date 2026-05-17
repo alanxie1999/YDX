@@ -1,6 +1,6 @@
 """
 zq_multiuser.py - 多用户投注脚本（固定金额模式 + 倍投模式）
-版本：3.4.5
+版本：3.4.6
 日期：2026-05-17
 """
 
@@ -4833,27 +4833,36 @@ def _get_dragon_or_alternation_extra(rt: dict, history: list = None) -> int:
             history = rt.get("_history_cache", [])
     
     if not isinstance(history, list) or len(history) < 6:
-        return 0
-    
-    # 输了后清除加注标记，恢复初始策略
-    if rt.get("lose_count", 0) > 0:
-        rt["dragon_extra_triggered"] = False
+        # 历史不足 6 手，清除冷却
+        rt["dragon_extra_cooldown"] = False
         return 0
     
     # 检测长龙：6 连相同
     streak, last = _get_history_tail_streak(history)
+    
+    # 检测交替：101010 或 010101
+    is_alternation = False
+    if len(history) >= 6:
+        last_6 = "".join(str(x) for x in history[-6:])
+        is_alternation = last_6 in ("101010", "010101")
+    
+    # 如果既不是长龙也不是交替，清除冷却标记
+    if streak < 6 and not is_alternation:
+        rt["dragon_extra_cooldown"] = False
+    
+    # 输了后进入冷却，不再触发加注
+    if rt.get("dragon_extra_cooldown", False):
+        return 0
+    
     if streak >= 6:
         rt["dragon_extra_triggered"] = True
         rt["dragon_type"] = "dragon"
         return 1000000
     
-    # 检测交替：101010 或 010101
-    if len(history) >= 6:
-        last_6 = "".join(str(x) for x in history[-6:])
-        if last_6 in ("101010", "010101"):
-            rt["dragon_extra_triggered"] = True
-            rt["dragon_type"] = "alternation"
-            return 1000000
+    if is_alternation:
+        rt["dragon_extra_triggered"] = True
+        rt["dragon_type"] = "alternation"
+        return 1000000
     
     return 0
 
@@ -6432,6 +6441,10 @@ async def _process_settle_slim(client, event, user_ctx: UserContext, global_conf
             rt["win_count"] = rt.get("win_count", 0) + 1 if win else 0
             rt["lose_count"] = rt.get("lose_count", 0) + 1 if not win else 0
             rt["status"] = 1 if win else 0
+            
+            # 赢了清除冷却标记，允许新的长龙/交替形态触发加注
+            if win:
+                rt["dragon_extra_cooldown"] = False
 
             settled_entry["result"] = result_text
             settled_entry["profit"] = profit
@@ -6447,7 +6460,24 @@ async def _process_settle_slim(client, event, user_ctx: UserContext, global_conf
                     int(active_chain_summary.get("lose_count", 0)),
                     int(old_lose_count) + 1,
                 )
-                rt["bet_amount"] = int(active_chain_summary.get("last_amount", bet_amount) or bet_amount)
+                
+                # 长龙/交替加注输了后，重置倍投逻辑，用初始金额重新开始
+                if rt.get("dragon_extra_triggered", False):
+                    rt["bet_amount"] = int(rt.get("initial_amount", 500))
+                    rt["lose_count"] = 0
+                    rt["bet_sequence_count"] = 0
+                    rt["dragon_extra_triggered"] = False
+                    rt["dragon_type"] = None
+                    rt["dragon_extra_cooldown"] = True  # 进入冷却，不再触发加注
+                    log_event(
+                        logging.INFO,
+                        'settle',
+                        '长龙/交替加注不中，重置倍投逻辑',
+                        user_id=user_ctx.user_id,
+                        data=f"下注金额重置为初始值 {int(rt.get('initial_amount', 500))}"
+                    )
+                else:
+                    rt["bet_amount"] = int(active_chain_summary.get("last_amount", bet_amount) or bet_amount)
 
             if _verbose_runtime_diag_enabled():
                 log_event(
@@ -7225,6 +7255,10 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 rt["bet_amount"] = int(preset[6])
                 # st 命令：跟随同向下注
                 rt["bet_direction"] = "same"
+                # 初始化长龙/交替加注标记
+                rt["dragon_extra_triggered"] = False
+                rt["dragon_extra_cooldown"] = False
+                rt["dragon_type"] = None
                 await _clear_pause_countdown_notice(client, user_ctx)
                 rt["switch"] = True
                 rt["manual_pause"] = False
@@ -7289,6 +7323,10 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 rt["bet_amount"] = int(preset[6])
                 # mt 命令：交替下注（反向）
                 rt["bet_direction"] = "reverse"
+                # 初始化长龙/交替加注标记
+                rt["dragon_extra_triggered"] = False
+                rt["dragon_extra_cooldown"] = False
+                rt["dragon_type"] = None
                 await _clear_pause_countdown_notice(client, user_ctx)
                 rt["switch"] = True
                 rt["manual_pause"] = False
