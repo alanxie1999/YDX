@@ -1,6 +1,6 @@
 """
 zq_multiuser.py - 多用户投注脚本（固定金额模式 + 倍投模式）
-版本：3.2.0
+版本：3.3.0
 日期：2026-05-16
 """
 
@@ -4284,8 +4284,14 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
     log_event(logging.INFO, 'bet_on', '策略诊断', user_id=user_ctx.user_id, 
               data=f"历史：{history[-10:]}, 最后一手：{history[-1] if history else '无'}")
     
-    # 倍投模式：支持同向/交替下注
-    if len(history) > 0:
+    # 优先级 0: 检测长龙/交替形态（最高优先级，覆盖 st/mt 设定）
+    dragon_prediction = _check_dragon_or_alternation_prediction(history)
+    if dragon_prediction is not None:
+        prediction = dragon_prediction
+        log_event(logging.INFO, 'bet_on', '长龙/交替优先', user_id=user_ctx.user_id,
+                  data=f"prediction={prediction}")
+    # 优先级 1: st/mt 方向设定
+    elif len(history) > 0:
         bet_direction = rt.get("bet_direction", "same")
         if bet_direction == "reverse":
             # mt 命令：交替下注（与上一手相反）
@@ -4836,6 +4842,36 @@ def _get_dragon_or_alternation_extra(rt: dict, history: list = None) -> int:
         return 1000000
     
     return 0
+
+
+def _check_dragon_or_alternation_prediction(history: list) -> int:
+    """检测长龙/交替形态并返回预测方向（最高优先级）。
+    
+    长龙（111111/000000）：同向下注（跟随长龙方向）
+    交替（101010/010101）：反向下注（与交替预期相反）
+    
+    Returns:
+        int: 预测方向（0=小，1=大），如果未检测到形态则返回 None
+    """
+    if not isinstance(history, list) or len(history) < 6:
+        return None
+    
+    # 检测长龙：6 连相同
+    streak, last = _get_history_tail_streak(history)
+    if streak >= 6:
+        # 长龙：同向下注（跟随长龙方向）
+        return last
+    
+    # 检测交替：101010 或 010101
+    last_6 = "".join(str(x) for x in history[-6:])
+    if last_6 in ("101010", "010101"):
+        # 交替：反向下注（与交替预期相反）
+        # 101010 的下一个预期是 1，所以下 0
+        # 010101 的下一个预期是 0，所以下 1
+        expected = 1 if last_6 == "101010" else 0
+        return 1 - expected  # 反向
+    
+    return None
 
 
 def _build_pause_resume_hint(rt: dict) -> str:
