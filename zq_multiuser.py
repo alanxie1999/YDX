@@ -1,6 +1,6 @@
 """
 zq_multiuser.py - 多用户投注脚本（固定金额模式 + 倍投模式）
-版本：3.4.0
+版本：3.4.1
 日期：2026-05-16
 """
 
@@ -4291,6 +4291,21 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
     dragon_prediction = _check_dragon_or_alternation_prediction(history)
     if dragon_prediction is not None:
         prediction = dragon_prediction
+        # 检测是长龙还是交替
+        streak, last = _get_history_tail_streak(history)
+        if streak >= 6:
+            # 长龙：同向
+            rt["last_predict_source"] = "dragon_trend"
+            rt["last_predict_tag"] = "DRAGON_TREND"
+            rt["last_predict_confidence"] = 100
+            rt["last_predict_reason"] = f"长龙{streak}连{'大' if last == 1 else '小'}，同向下{'大' if prediction == 1 else '小'}"
+        else:
+            # 交替：反向
+            last_6 = "".join(str(x) for x in history[-6:])
+            rt["last_predict_source"] = "alternation_pattern"
+            rt["last_predict_tag"] = "ALTERNATION_PATTERN"
+            rt["last_predict_confidence"] = 100
+            rt["last_predict_reason"] = f"交替{last_6}，反向下{'大' if prediction == 1 else '小'}"
         log_event(logging.INFO, 'bet_on', '长龙/交替优先', user_id=user_ctx.user_id,
                   data=f"prediction={prediction}")
     # 优先级 1: st/mt 方向设定
