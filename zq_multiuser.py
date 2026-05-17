@@ -1,7 +1,7 @@
 """
 zq_multiuser.py - 多用户投注脚本（固定金额模式 + 倍投模式）
-版本：3.4.1
-日期：2026-05-16
+版本：3.4.2
+日期：2026-05-17
 """
 
 import logging
@@ -8277,6 +8277,8 @@ def _build_yc_result_message(params, preset_name: str, current_fund: int, auto_t
     header_line = "🔮 已根据当前预设自动测算\n" if auto_trigger else ""
     
     # 读取方向参数
+    bet_direction = params.get("bet_direction", "same")
+    direction_label = "交替反向" if bet_direction == "reverse" else "跟随同向"
     
     command_text = (
         f"{params['continuous']} {params['lose_stop']} "
