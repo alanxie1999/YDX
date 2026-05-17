@@ -1,6 +1,6 @@
 """
 zq_multiuser.py - 多用户投注脚本（固定金额模式 + 倍投模式）
-版本：3.4.7
+版本：3.4.8
 日期：2026-05-17
 """
 
@@ -4293,19 +4293,21 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
         prediction = dragon_prediction
         # 检测是长龙还是交替
         streak, last = _get_history_tail_streak(history)
-        if streak >= 6:
+        last_6 = "".join(str(x) for x in history[-6:])
+        is_alternation = last_6 in ("101010", "010101")
+        
+        if is_alternation:
+            # 交替：反向
+            rt["last_predict_source"] = "alternation_pattern"
+            rt["last_predict_tag"] = "ALTERNATION_PATTERN"
+            rt["last_predict_confidence"] = 100
+            rt["last_predict_reason"] = f"交替{last_6}，反向下{'大' if prediction == 1 else '小'}"
+        else:
             # 长龙：同向
             rt["last_predict_source"] = "dragon_trend"
             rt["last_predict_tag"] = "DRAGON_TREND"
             rt["last_predict_confidence"] = 100
             rt["last_predict_reason"] = f"长龙{streak}连{'大' if last == 1 else '小'}，同向下{'大' if prediction == 1 else '小'}"
-        else:
-            # 交替：反向
-            last_6 = "".join(str(x) for x in history[-6:])
-            rt["last_predict_source"] = "alternation_pattern"
-            rt["last_predict_tag"] = "ALTERNATION_PATTERN"
-            rt["last_predict_confidence"] = 100
-            rt["last_predict_reason"] = f"交替{last_6}，反向下{'大' if prediction == 1 else '小'}"
         log_event(logging.INFO, 'bet_on', '长龙/交替优先', user_id=user_ctx.user_id,
                   data=f"prediction={prediction}")
     # 优先级 1: st/mt 方向设定
@@ -4892,7 +4894,10 @@ def _check_dragon_or_alternation_prediction(history: list) -> int:
         # 101010 的下一个预期是 1，所以下 0
         # 010101 的下一个预期是 0，所以下 1
         expected = 1 if last_6 == "101010" else 0
-        return 1 - expected  # 反向
+        prediction = 1 - expected  # 反向
+        log_event(logging.DEBUG, 'bet_on', '交替预测调试', 
+                  data=f"last_6={last_6}, expected={expected}, prediction={prediction}({'大' if prediction == 1 else '小'})")
+        return prediction
     
     return None
 
