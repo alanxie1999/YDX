@@ -1,6 +1,6 @@
 """
 zq_multiuser.py - 多用户投注脚本（固定金额模式 + 倍投模式）
-版本：3.4.14
+版本：3.4.15
 日期：2026-05-17
 """
 
@@ -1944,8 +1944,8 @@ def _build_help_card() -> str:
         "• <code>/mt fix500/fix1000/...</code> 固定金额，交替反向\n"
         "<i>连输 10 局自动暂停 10 局，暂停结束后继续</i>\n\n"
         "<b>🎯 特殊形态优先级（最高）</b>\n"
-        "• <b>长龙（111111/000000）</b>：同向下注 + 第 7 手加注 100 万\n"
-        "• <b>交替（101010/010101）</b>：反向下注 + 第 7 手加注 100 万\n"
+        "• <b>长龙（11111/00000）</b>：同向下注 + 第 6 手加注 100 万\n"
+        "• <b>交替（10101/01010）</b>：反向下注 + 第 6 手加注 100 万\n"
         "<i>覆盖 st/mt 设定，不中后恢复预设金额</i>\n\n"
         "<b>🛠 系统与数据（进阶）</b>\n"
         "• <code>/res tj</code> 重置收益/胜率统计\n"
@@ -4298,17 +4298,17 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
         prediction = dragon_prediction
         # 检测是长龙还是交替
         streak, last = _get_history_tail_streak(history)
-        last_6 = "".join(str(x) for x in history[-6:])
-        is_alternation = last_6 in ("101010", "010101")
+        last_5 = "".join(str(x) for x in history[-5:])
+        is_alternation = last_5 in ("10101", "01010")
         
         if is_alternation:
             # 交替：与上一手相反
             rt["last_predict_source"] = "alternation_pattern"
             rt["last_predict_tag"] = "ALTERNATION_PATTERN"
             rt["last_predict_confidence"] = 100
-            rt["last_predict_reason"] = f"交替{last_6}，与上一手相反下{'大' if prediction == 1 else '小'}"
+            rt["last_predict_reason"] = f"交替{last_5}，与上一手相反下{'大' if prediction == 1 else '小'}"
             log_event(logging.INFO, 'bet_on', '交替形态确认', user_id=user_ctx.user_id,
-                      data=f"last_6={last_6}, 预测方向={prediction}({'大' if prediction == 1 else '小'}), 与上一手相反✓")
+                      data=f"last_5={last_5}, 预测方向={prediction}({'大' if prediction == 1 else '小'}), 与上一手相反✓")
         else:
             # 长龙：同向
             rt["last_predict_source"] = "dragon_trend"
@@ -4835,35 +4835,35 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
 
 
 def _get_dragon_or_alternation_extra(rt: dict, history: list = None) -> int:
-    """长龙（111111/000000）或交替（101010/010101）第 7 手加注 100 万，输了后恢复初始策略。"""
+    """长龙（111111/000000）或交替（101010/010101）第 6 手加注 100 万，输了后恢复初始策略。"""
     if history is None:
         history = rt.get("_current_history", [])
         if not history:
             history = rt.get("_history_cache", [])
     
-    if not isinstance(history, list) or len(history) < 6:
-        # 历史不足 6 手，清除冷却
+    if not isinstance(history, list) or len(history) < 5:
+        # 历史不足 5 手，清除冷却
         rt["dragon_extra_cooldown"] = False
         return 0
     
-    # 检测长龙：6 连相同
+    # 检测长龙：5 连相同（第 6 手加注）
     streak, last = _get_history_tail_streak(history)
     
-    # 检测交替：101010 或 010101
+    # 检测交替：10101 或 01010（5 连交替，第 6 手加注）
     is_alternation = False
-    if len(history) >= 6:
-        last_6 = "".join(str(x) for x in history[-6:])
-        is_alternation = last_6 in ("101010", "010101")
+    if len(history) >= 5:
+        last_5 = "".join(str(x) for x in history[-5:])
+        is_alternation = last_5 in ("10101", "01010")
     
     # 如果既不是长龙也不是交替，清除冷却标记
-    if streak < 6 and not is_alternation:
+    if streak < 5 and not is_alternation:
         rt["dragon_extra_cooldown"] = False
     
     # 输了后进入冷却，不再触发加注
     if rt.get("dragon_extra_cooldown", False):
         return 0
     
-    if streak >= 6:
+    if streak >= 5:
         rt["dragon_extra_triggered"] = True
         rt["dragon_type"] = "dragon"
         return 1000000
@@ -4879,29 +4879,29 @@ def _get_dragon_or_alternation_extra(rt: dict, history: list = None) -> int:
 def _check_dragon_or_alternation_prediction(history: list) -> int:
     """检测长龙/交替形态并返回预测方向（最高优先级）。
     
-    长龙（111111/000000）：同向下注（跟随长龙方向）
-    交替（101010/010101）：反向下注（与上一手相反）
+    长龙（11111/00000）：同向下注（跟随长龙方向）
+    交替（10101/01010）：反向下注（与上一手相反）
     
     Returns:
         int: 预测方向（0=小，1=大），如果未检测到形态则返回 None
     """
-    if not isinstance(history, list) or len(history) < 6:
+    if not isinstance(history, list) or len(history) < 5:
         return None
     
-    # 检测长龙：6 连相同
+    # 检测长龙：5 连相同（第 6 手下注）
     streak, last = _get_history_tail_streak(history)
-    if streak >= 6:
+    if streak >= 5:
         # 长龙：同向下注（跟随长龙方向）
         return last
     
-    # 检测交替：101010 或 010101
-    last_6 = "".join(str(x) for x in history[-6:])
-    if last_6 in ("101010", "010101"):
+    # 检测交替：10101 或 01010（5 连交替，第 6 手下注）
+    last_5 = "".join(str(x) for x in history[-5:])
+    if last_5 in ("10101", "01010"):
         # 交替：反向下注（与上一手相反）
         last_hand = history[-1]  # 上一手结果
         prediction = 1 - last_hand  # 与上一手相反
         log_event(logging.DEBUG, 'bet_on', '交替预测调试', 
-                  data=f"last_6={last_6}, 上一手={last_hand}({'大' if last_hand == 1 else '小'}), prediction={prediction}({'大' if prediction == 1 else '小'}), 与上一手相反✓")
+                  data=f"last_5={last_5}, 上一手={last_hand}({'大' if last_hand == 1 else '小'}), prediction={prediction}({'大' if prediction == 1 else '小'}), 与上一手相反✓")
         return prediction
     
     return None
