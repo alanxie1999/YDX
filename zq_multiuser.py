@@ -1,6 +1,6 @@
 """
 zq_multiuser.py - 多用户投注脚本（固定金额模式 + 倍投模式）
-版本：3.4.13
+版本：3.4.14
 日期：2026-05-17
 """
 
@@ -1932,7 +1932,12 @@ def _build_help_card() -> str:
         "• <code>/mt 5k</code> 首注 500，交替反向\n"
         "• <code>/mt 1w</code> 首注 1000，交替反向\n"
         "• <code>/mt 2w/3w/5w/10w</code> 交替下注\n"
-        "<i>st=跟随上一手，mt=与上一手相反，每 50 局自动轮换模式</i>\n\n"
+        "<i>st=跟随上一手，mt=与上一手相反</i>\n\n"
+        "<b>🔁 自动轮换模式</b>\n"
+        "• <code>/rotation</code> 切换自动轮换开关\n"
+        "• <code>/rotation on</code> 开启自动轮换（每 50 局轮换）\n"
+        "• <code>/rotation off</code> 关闭自动轮换\n"
+        "<i>轮换模式会在陪投和交替下注之间自动切换</i>\n\n"
         "<b>💵 固定金额模式</b>\n"
         "• <code>/st fix500/fix1000/fix2000/fix5000</code> 固定金额，同向跟随\n"
         "• <code>/st fix1w/fix10w/fix25w</code> 固定金额，同向跟随\n"
@@ -6430,23 +6435,24 @@ async def _process_settle_slim(client, event, user_ctx: UserContext, global_conf
             if win:
                 rt["dragon_extra_cooldown"] = False
             
-            # 每 50 局轮换陪投和交替下注模式
-            rt["mode_rotation_count"] = rt.get("mode_rotation_count", 0) + 1
-            if rt["mode_rotation_count"] >= 50:
-                rt["mode_rotation_count"] = 0
-                # 轮换模式
-                old_mode = rt.get("current_bet_mode", "same")
-                new_mode = "reverse" if old_mode == "same" else "same"
-                rt["current_bet_mode"] = new_mode
-                rt["bet_direction"] = new_mode
-                mode_text = "交替下注" if new_mode == "reverse" else "陪投跟随"
-                log_event(
-                    logging.INFO,
-                    'settle',
-                    '模式轮换',
-                    user_id=user_ctx.user_id,
-                    data=f"已运行 50 局，从{('陪投' if old_mode == 'same' else '交替')}轮换为{mode_text}"
-                )
+            # 每 50 局轮换陪投和交替下注模式（如果已开启）
+            if rt.get("auto_rotation_enabled", True):
+                rt["mode_rotation_count"] = rt.get("mode_rotation_count", 0) + 1
+                if rt["mode_rotation_count"] >= 50:
+                    rt["mode_rotation_count"] = 0
+                    # 轮换模式
+                    old_mode = rt.get("current_bet_mode", "same")
+                    new_mode = "reverse" if old_mode == "same" else "same"
+                    rt["current_bet_mode"] = new_mode
+                    rt["bet_direction"] = new_mode
+                    mode_text = "交替下注" if new_mode == "reverse" else "陪投跟随"
+                    log_event(
+                        logging.INFO,
+                        'settle',
+                        '模式轮换',
+                        user_id=user_ctx.user_id,
+                        data=f"已运行 50 局，从{('陪投' if old_mode == 'same' else '交替')}轮换为{mode_text}"
+                    )
 
             settled_entry["result"] = result_text
             settled_entry["profit"] = profit
@@ -7309,6 +7315,55 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                     user_ctx,
                     global_config,
                 )
+            return
+        
+        # rotation/mode - 控制是否开启轮换下注模式
+        if cmd in ("rotation", "mode", "轮换", "轮换模式"):
+            # 读取参数：on/off/switch 或无参数（切换）
+            action = my[1] if len(my) > 1 else "switch"
+            
+            current_mode = rt.get("auto_rotation_enabled", True)
+            
+            if action in ("on", "open", "开启", "打开"):
+                rt["auto_rotation_enabled"] = True
+                mes = _build_ops_card(
+                    "✅ 已开启自动轮换模式",
+                    summary="每 50 局自动轮换陪投和交替下注模式。",
+                    fields=[
+                        ("当前模式", "陪投跟随" if rt.get("current_bet_mode") == "same" else "交替下注"),
+                        ("已运行局数", str(rt.get("mode_rotation_count", 0))),
+                    ],
+                    action="轮换将在达到 50 局时自动触发。",
+                )
+                log_event(logging.INFO, 'user_cmd', '开启轮换模式', user_id=user_ctx.user_id)
+            elif action in ("off", "close", "关闭"):
+                rt["auto_rotation_enabled"] = False
+                mes = _build_ops_card(
+                    "⏸️ 已关闭自动轮换模式",
+                    summary="当前下注模式将保持不变，不再自动轮换。",
+                    fields=[
+                        ("当前模式", "陪投跟随" if rt.get("current_bet_mode") == "same" else "交替下注"),
+                        ("已运行局数", str(rt.get("mode_rotation_count", 0))),
+                    ],
+                    action="如需重新开启，请执行 `rotation on`。",
+                )
+                log_event(logging.INFO, 'user_cmd', '关闭轮换模式', user_id=user_ctx.user_id)
+            else:
+                # switch/无参数：切换开关状态
+                rt["auto_rotation_enabled"] = not current_mode
+                status_text = "已开启" if rt["auto_rotation_enabled"] else "已关闭"
+                mes = _build_ops_card(
+                    f"🔄 自动轮换模式{status_text}",
+                    summary="每 50 局自动轮换陪投和交替下注模式。" if rt["auto_rotation_enabled"] else "当前下注模式将保持不变。",
+                    fields=[
+                        ("当前模式", "陪投跟随" if rt.get("current_bet_mode") == "same" else "交替下注"),
+                        ("已运行局数", str(rt.get("mode_rotation_count", 0))),
+                    ],
+                    action="使用 `rotation on/off` 可以手动开启/关闭。",
+                )
+                log_event(logging.INFO, 'user_cmd', '切换轮换模式', user_id=user_ctx.user_id)
+            
+            await send_to_admin(client, mes, user_ctx, global_config)
             return
         
         # mt - 交替下注（与上一手相反）
