@@ -1,6 +1,6 @@
 """
 zq_multiuser.py - 多用户投注脚本（固定金额模式 + 倍投模式）
-版本：3.4.11
+版本：3.4.12
 日期：2026-05-17
 """
 
@@ -6429,6 +6429,24 @@ async def _process_settle_slim(client, event, user_ctx: UserContext, global_conf
             # 赢了清除冷却标记，允许新的长龙/交替形态触发加注
             if win:
                 rt["dragon_extra_cooldown"] = False
+            
+            # 每 50 局轮换陪投和交替下注模式
+            rt["mode_rotation_count"] = rt.get("mode_rotation_count", 0) + 1
+            if rt["mode_rotation_count"] >= 50:
+                rt["mode_rotation_count"] = 0
+                # 轮换模式
+                old_mode = rt.get("current_bet_mode", "same")
+                new_mode = "reverse" if old_mode == "same" else "same"
+                rt["current_bet_mode"] = new_mode
+                rt["bet_direction"] = new_mode
+                mode_text = "交替下注" if new_mode == "reverse" else "陪投跟随"
+                log_event(
+                    logging.INFO,
+                    'settle',
+                    '模式轮换',
+                    user_id=user_ctx.user_id,
+                    data=f"已运行 50 局，从{('陪投' if old_mode == 'same' else '交替')}轮换为{mode_text}"
+                )
 
             settled_entry["result"] = result_text
             settled_entry["profit"] = profit
@@ -7243,6 +7261,9 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 rt["dragon_extra_triggered"] = False
                 rt["dragon_extra_cooldown"] = False
                 rt["dragon_type"] = None
+                # 初始化模式轮换计数器（每 50 局轮换）
+                rt["mode_rotation_count"] = 0
+                rt["current_bet_mode"] = "same"  # same=陪投，reverse=交替
                 await _clear_pause_countdown_notice(client, user_ctx)
                 rt["switch"] = True
                 rt["manual_pause"] = False
@@ -7311,6 +7332,9 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 rt["dragon_extra_triggered"] = False
                 rt["dragon_extra_cooldown"] = False
                 rt["dragon_type"] = None
+                # 初始化模式轮换计数器（每 50 局轮换）
+                rt["mode_rotation_count"] = 0
+                rt["current_bet_mode"] = "reverse"  # same=陪投，reverse=交替
                 await _clear_pause_countdown_notice(client, user_ctx)
                 rt["switch"] = True
                 rt["manual_pause"] = False
