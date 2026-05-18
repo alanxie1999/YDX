@@ -1,6 +1,6 @@
 """
 zq_multiuser.py - 多用户投注脚本（固定金额模式 + 倍投模式）
-版本：3.4.15
+版本：3.4.16
 日期：2026-05-17
 """
 
@@ -288,19 +288,19 @@ HIGH_STEP_DOUBLE_CONFIRM_MODEL_TIMEOUT_SEC = 5.0
 # 纯交替增强（旧版 AI 模型逻辑，已废弃）：当最近盘口“由近到远”出现 6 位纯交替时，
 # 注：当前简单跟随策略使用 5 位检测（10101/01010），在第 5 注后反向打破
 # 主脚本强制按最新一手同向下注，尝试结束交替。
-ALTERNATION_BREAK_TRIGGER_WINDOW = 6
-ALTERNATION_BREAK_PATTERNS = {"010101", "101010"}
+ALTERNATION_BREAK_TRIGGER_WINDOW = 5
+ALTERNATION_BREAK_PATTERNS = {"01010", "10101"}
 
 # 固定数据规律：检测到特定序列后，按照规律下注
 FIXED_PATTERNS = {
-    "010101": {"follow": "reverse", "label": "交替循环反转"},  # 按最新一手反向下注
-    "101010": {"follow": "reverse", "label": "交替循环反转"},  # 按最新一手反向下注
-    "111111": {"follow": "1", "label": "大龙延续"},
-    "000000": {"follow": "0", "label": "小龙延续"},
-    "00101": {"follow": "reverse", "label": "00101反向下注"},
-    "11010": {"follow": "reverse", "label": "11010反向下注"},
-    "001010": {"follow": "same", "label": "001010同向下注"},
-    "110101": {"follow": "same", "label": "110101同向下注"},
+    "01010": {"follow": "reverse", "label": "交替循环反转"},  # 按最新一手反向下注
+    "10101": {"follow": "reverse", "label": "交替循环反转"},  # 按最新一手反向下注
+    "11111": {"follow": "1", "label": "大龙延续"},
+    "00000": {"follow": "0", "label": "小龙延续"},
+    "00101": {"follow": "reverse", "label": "00101 反向下注"},
+    "11010": {"follow": "reverse", "label": "11010 反向下注"},
+    "001010": {"follow": "same", "label": "001010 同向下注"},
+    "110101": {"follow": "same", "label": "110101 同向下注"},
     "10100": {"follow": "same", "duration": 2, "label": "10100 后续 2 次同向"},
     "01011": {"follow": "same", "duration": 2, "label": "01011 后续 2 次同向"},
 }
@@ -2699,9 +2699,9 @@ def extract_pattern_features(history):
             break
     
     is_alternating = False
-    if len(seq_str) >= 6:
-        recent_6 = seq_str[-6:]
-        if recent_6 in ['010101', '101010']:
+    if len(seq_str) >= 5:
+        recent_5 = seq_str[-5:]
+        if recent_5 in ['01010', '10101']:
             is_alternating = True
     
     is_symmetric = False
@@ -3117,7 +3117,7 @@ _PREDICT_PATTERN_LABELS = {
     "SYMMETRIC_WRAP": "盘面偏乱",
     "CHAOS_SWITCH": "盘面偏乱",
     "CHAOS_NOISE": "盘面偏乱",
-    "ALTERNATION_BREAK": "6位纯交替",
+    "ALTERNATION_BREAK": "5 位纯交替",
     "TIMEOUT_FALLBACK": "信号不足",
     "INVALID_FALLBACK": "信号不足",
     "FALLBACK": "信号不足",
@@ -4809,7 +4809,7 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
     lose_three = float(rt.get("lose_three", 2.1))
     lose_four = float(rt.get("lose_four", 2.05))
     
-    # 检测长龙/交替第 7 手加注
+    # 检测长龙/交替第 6 手加注
     dragon_extra = _get_dragon_or_alternation_extra(rt, history)
     
     if win_count >= 0 and lose_count == 0:
@@ -4835,7 +4835,7 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
 
 
 def _get_dragon_or_alternation_extra(rt: dict, history: list = None) -> int:
-    """长龙（111111/000000）或交替（101010/010101）第 6 手加注 100 万，输了后恢复初始策略。"""
+    """长龙（11111/00000）或交替（10101/01010）第 6 手加注 100 万，输了后恢复初始策略。"""
     if history is None:
         history = rt.get("_current_history", [])
         if not history:
