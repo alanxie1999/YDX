@@ -1,6 +1,6 @@
 """
 zq_multiuser.py - 多用户投注脚本（固定金额模式 + 倍投模式）
-版本：3.4.9
+版本：3.4.10
 日期：2026-05-17
 """
 
@@ -4297,11 +4297,13 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
         is_alternation = last_6 in ("101010", "010101")
         
         if is_alternation:
-            # 交替：反向
+            # 交替：与上一手相反
             rt["last_predict_source"] = "alternation_pattern"
             rt["last_predict_tag"] = "ALTERNATION_PATTERN"
             rt["last_predict_confidence"] = 100
-            rt["last_predict_reason"] = f"交替{last_6}，反向下{'大' if prediction == 1 else '小'}"
+            rt["last_predict_reason"] = f"交替{last_6}，与上一手相反下{'大' if prediction == 1 else '小'}"
+            log_event(logging.INFO, 'bet_on', '交替形态确认', user_id=user_ctx.user_id,
+                      data=f"last_6={last_6}, 预测方向={prediction}({'大' if prediction == 1 else '小'}), 与上一手相反✓")
         else:
             # 长龙：同向
             rt["last_predict_source"] = "dragon_trend"
@@ -4873,7 +4875,7 @@ def _check_dragon_or_alternation_prediction(history: list) -> int:
     """检测长龙/交替形态并返回预测方向（最高优先级）。
     
     长龙（111111/000000）：同向下注（跟随长龙方向）
-    交替（101010/010101）：反向下注（与交替预期相反）
+    交替（101010/010101）：反向下注（与上一手相反）
     
     Returns:
         int: 预测方向（0=小，1=大），如果未检测到形态则返回 None
@@ -4890,13 +4892,11 @@ def _check_dragon_or_alternation_prediction(history: list) -> int:
     # 检测交替：101010 或 010101
     last_6 = "".join(str(x) for x in history[-6:])
     if last_6 in ("101010", "010101"):
-        # 交替：反向下注（与交替预期相反）
-        # 101010 的下一个预期是 1，所以下 0
-        # 010101 的下一个预期是 0，所以下 1
-        expected = 1 if last_6 == "101010" else 0
-        prediction = 1 - expected  # 反向
+        # 交替：反向下注（与上一手相反）
+        last_hand = history[-1]  # 上一手结果
+        prediction = 1 - last_hand  # 与上一手相反
         log_event(logging.DEBUG, 'bet_on', '交替预测调试', 
-                  data=f"last_6={last_6}, expected={expected}, prediction={prediction}({'大' if prediction == 1 else '小'})")
+                  data=f"last_6={last_6}, 上一手={last_hand}({'大' if last_hand == 1 else '小'}), prediction={prediction}({'大' if prediction == 1 else '小'}), 与上一手相反✓")
         return prediction
     
     return None
