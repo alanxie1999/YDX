@@ -1,6 +1,6 @@
 """
 zq_multiuser.py - 多用户投注脚本（固定金额模式 + 倍投模式）
-版本：3.4.10
+版本：3.4.11
 日期：2026-05-17
 """
 
@@ -1957,7 +1957,7 @@ def _build_help_card() -> str:
         "• <code>/xx</code> 执行辅助数据操作\n\n"
         "<b>📊 历史记录</b>\n"
         "• 自动保存到 <code>logs/YYYY-MM-DD.txt</code>\n"
-        "<i>每局结算后自动追加，包含方向、金额、输赢、余额等信息</i>\n\n"
+        "<i>每局结算后自动追加，仅记录时间和开奖结果</i>\n\n"
         "<b>⚡ 快捷更新流程</b>\n"
         "<code>/update → /restart → /status</code>\n"
         "<i>一键三连：更新、重启、确认状态</i>"
@@ -6133,32 +6133,11 @@ def _save_history_to_file(state, rt: dict, win: bool, profit: int, bet_amount: i
     # 获取当前时间
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    # 获取轮次和序号
-    settle_round = int(rt.get("current_round", 1))
-    settle_seq = int(rt.get("current_bet_seq", 1))
-    
-    # 获取方向
-    direction = "大" if prediction == 1 else "小"
+    # 获取开奖结果
     result_type = "大" if result == 1 else "小"
     
-    # 获取预设名称
-    preset_name = rt.get("current_preset_name", "未知")
-    
-    # 获取资金信息
-    account_balance = rt.get("account_balance", 0)
-    gambling_fund = rt.get("gambling_fund", 0)
-    
-    # 格式化输赢
-    win_loss = "赢" if win else "输"
-    profit_text = f"+{profit}" if win else str(profit)
-    
-    # 构建记录行
-    record = (
-        f"{timestamp} | {today} | 第{settle_round}轮第{settle_seq}次 | "
-        f"预设:{preset_name} | 方向:{direction} | 金额:{bet_amount} | "
-        f"结果:{result_type} | {win_loss}:{profit_text} | "
-        f"账户:{account_balance/10000:.2f}万 | 菠菜:{gambling_fund/10000:.2f}万\n"
-    )
+    # 构建记录行（仅时间和开奖结果）
+    record = f"{timestamp} | 结果:{result_type}\n"
     
     # 追加写入文件
     with open(file_path, "a", encoding="utf-8") as f:
