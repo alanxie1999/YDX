@@ -1,6 +1,6 @@
 """
 zq_multiuser.py - 多用户投注脚本（固定金额模式 + 倍投模式）
-版本：3.4.12
+版本：3.4.13
 日期：2026-05-17
 """
 
@@ -1932,7 +1932,7 @@ def _build_help_card() -> str:
         "• <code>/mt 5k</code> 首注 500，交替反向\n"
         "• <code>/mt 1w</code> 首注 1000，交替反向\n"
         "• <code>/mt 2w/3w/5w/10w</code> 交替下注\n"
-        "<i>st=跟随上一手，mt=与上一手相反</i>\n\n"
+        "<i>st=跟随上一手，mt=与上一手相反，每 50 局自动轮换模式</i>\n\n"
         "<b>💵 固定金额模式</b>\n"
         "• <code>/st fix500/fix1000/fix2000/fix5000</code> 固定金额，同向跟随\n"
         "• <code>/st fix1w/fix10w/fix25w</code> 固定金额，同向跟随\n"
