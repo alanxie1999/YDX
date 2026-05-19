@@ -1,6 +1,6 @@
 """
 zq_multiuser.py - 多用户投注脚本（固定金额模式 + 倍投模式）
-版本：3.4.17
+版本：3.4.18
 日期：2026-05-17
 """
 
@@ -1944,8 +1944,8 @@ def _build_help_card() -> str:
         "• <code>/mt fix500/fix1000/...</code> 固定金额，交替反向\n"
         "<i>连输 10 局自动暂停 10 局，暂停结束后继续</i>\n\n"
         "<b>🎯 特殊形态优先级（最高）</b>\n"
-        "• <b>长龙（111111/000000）</b>：同向下注 + 第 7 手加注 100 万\n"
-        "• <b>交替（101010/010101）</b>：反向下注 + 第 7 手加注 100 万\n"
+        "• <b>长龙（111111/000000）</b>：同向下注 + 第 7 手加注 50 万\n"
+        "• <b>交替（101010/010101）</b>：反向下注 + 第 7 手加注 50 万\n"
         "<i>覆盖 st/mt 设定，不中后恢复预设金额</i>\n\n"
         "<b>🛠 系统与数据（进阶）</b>\n"
         "• <code>/res tj</code> 重置收益/胜率统计\n"
@@ -4835,7 +4835,7 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
 
 
 def _get_dragon_or_alternation_extra(rt: dict, history: list = None) -> int:
-    """长龙（111111/000000）或交替（101010/010101）第 7 手加注 100 万，输了后恢复初始策略。"""
+    """长龙（111111/000000）或交替（101010/010101）第 7 手加注 50 万，输了后恢复初始策略。"""
     if history is None:
         history = rt.get("_current_history", [])
         if not history:
@@ -4866,12 +4866,12 @@ def _get_dragon_or_alternation_extra(rt: dict, history: list = None) -> int:
     if streak >= 6:
         rt["dragon_extra_triggered"] = True
         rt["dragon_type"] = "dragon"
-        return 1000000
+        return 500000
     
     if is_alternation:
         rt["dragon_extra_triggered"] = True
         rt["dragon_type"] = "alternation"
-        return 1000000
+        return 500000
     
     return 0
 
