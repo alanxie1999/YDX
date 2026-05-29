@@ -688,6 +688,8 @@ def _is_runtime_file(path: str) -> bool:
         return True
     if normalized in {"state.json", "account_funds.json", "MULTIUSER_TEST_RESULTS.json"}:
         return True
+    if normalized.endswith(".default"):
+        return True
     if normalized.endswith(".log"):
         return True
     if ".log." in filename:
