@@ -449,6 +449,11 @@ def get_default_runtime() -> Dict[str, Any]:
         "balance_status": "unknown",
         "status": 0,
         
+        # 下注模式轮换代数
+        "bet_mode": "follow",  # follow=跟随，alternation=交替
+        "bet_mode_round": 0,  # 当前轮次计数
+        "bet_mode_interval": 50,  # 轮换间隔（局数）
+        
         # 算法相关变量
         "last_predict_info": "等待本局预测",
         "api_key_index": 0,

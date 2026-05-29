@@ -239,6 +239,11 @@ except Exception:
 
 # 自动统计推送节奏：每 10 局一次，保留 10 分钟后自动删除
 AUTO_STATS_INTERVAL_ROUNDS = 10
+
+# 下注模式轮换配置
+BET_MODE_INTERVAL = 50  # 每 50 局轮换一次
+BET_MODE_FOLLOW = "follow"  # 跟随模式
+BET_MODE_ALTERNATION = "alternation"  # 交替模式
 AUTO_STATS_DELETE_DELAY_SECONDS = 600
 
 # 风控节奏：以最近 40 笔实盘胜率为基础，结合连输深度做分层暂停。
@@ -1922,7 +1927,13 @@ def _build_help_card() -> str:
         "• <code>/status</code> 查看运行状态看板\n"
         "• <code>/pause</code> / <code>/resume</code> 暂停/恢复下注\n"
         "• <code>/balance</code> 刷新当前账户余额\n"
-        "• <code>/stats</code> 查看连大、连小、连输统计\n\n"
+        "• <code>/stats</code> 查看连大、连小、连输统计\n"
+        "• <code>/mt</code> / <code>/mf</code> 交替/跟随下注模式\n\n"
+        "<b>💰 资金与阈值</b>\n"
+        "<b>🎯 下注模式轮换</b>\n"
+        "• <code>/mt</code> 切换到交替下注模式\n"
+        "• <code>/mf</code> 切换到跟随下注模式\n"
+        "<i>自动轮换：每 50 局自动切换一次模式</i>\n\n"
         "<b>💰 资金与阈值</b>\n"
         "• <code>/gf [金额]</code> 设置菠菜资金上限\n"
         "• <code>/stf [数字]</code> 设置本轮目标金额（单位：万）\n"
@@ -4373,7 +4384,28 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
             rt["last_predict_reason"] = reason
             log_event(logging.INFO, 'bet_on', '固定规律', user_id=user_ctx.user_id,
                       data=f"seq={seq}, follow={follow}, prediction={prediction}")
-        # 优先级 2: 5 位纯交替打破
+        # 优先级 2: 交替模式检查（仅在 bet_mode=alternation 时生效）
+        elif rt.get("bet_mode", BET_MODE_FOLLOW) == BET_MODE_ALTERNATION and len(history) >= 5:
+            last_5 = "".join(str(x) for x in history[-5:])
+            if last_5 in ("10101", "01010"):
+                # 交替模式：5 位纯交替时反向打破
+                prediction = 1 - history[-1]
+                rt["last_predict_source"] = "alternation_mode"
+                rt["last_predict_tag"] = "ALTERNATION_MODE"
+                rt["last_predict_confidence"] = 100
+                rt["last_predict_reason"] = f"交替模式：5 位纯交替{last_5}，反向下注{'大' if prediction == 1 else '小'}"
+                log_event(logging.INFO, 'bet_on', '交替模式反向', user_id=user_ctx.user_id,
+                          data=f"last_5={last_5}, history[-1]={history[-1]}, prediction={prediction}")
+            else:
+                # 否则跟随上一手
+                prediction = history[-1]
+                rt["last_predict_source"] = "follow_last"
+                rt["last_predict_tag"] = "FOLLOW_TREND"
+                rt["last_predict_confidence"] = 50
+                rt["last_predict_reason"] = f"交替模式：跟随上一手{history[-1]}，下{'大' if prediction == 1 else '小'}"
+                log_event(logging.INFO, 'bet_on', '交替模式跟随', user_id=user_ctx.user_id,
+                          data=f"history[-1]={history[-1]}, prediction={prediction}")
+        # 优先级 2: 5 位纯交替打破（跟随模式的旧逻辑，保留向后兼容）
         elif len(history) >= 5:
             last_5 = "".join(str(x) for x in history[-5:])
             if last_5 in ("10101", "01010"):
@@ -6475,6 +6507,23 @@ async def _process_settle_slim(client, event, user_ctx: UserContext, global_conf
             rt["win_count"] = rt.get("win_count", 0) + 1 if win else 0
             rt["lose_count"] = rt.get("lose_count", 0) + 1 if not win else 0
             rt["status"] = 1 if win else 0
+            
+            # 下注模式轮换计数
+            bet_mode_interval = int(rt.get("bet_mode_interval", BET_MODE_INTERVAL))
+            rt["bet_mode_round"] = rt.get("bet_mode_round", 0) + 1
+            if rt["bet_mode_round"] >= bet_mode_interval:
+                # 轮换下注模式
+                old_mode = rt.get("bet_mode", BET_MODE_FOLLOW)
+                new_mode = BET_MODE_ALTERNATION if old_mode == BET_MODE_FOLLOW else BET_MODE_FOLLOW
+                rt["bet_mode"] = new_mode
+                rt["bet_mode_round"] = 0
+                log_event(
+                    logging.INFO,
+                    'settle',
+                    '下注模式轮换',
+                    user_id=user_ctx.user_id,
+                    data=f"old={old_mode}, new={new_mode}, interval={bet_mode_interval}"
+                )
 
             settled_entry["result"] = result_text
             settled_entry["profit"] = profit
@@ -7441,6 +7490,50 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                         global_config,
                     )
                 return
+        
+        # mt - 切换到交替下注模式
+        if cmd == "mt":
+            rt["bet_mode"] = BET_MODE_ALTERNATION
+            rt["bet_mode_round"] = 0
+            mode_info_text = "交替模式：5 位纯交替 (10101/01010) 时反向打破"
+            user_ctx.save_state()
+            mes = _build_ops_card(
+                "✅ 已切换到交替下注模式",
+                fields=[
+                    ("当前模式", mode_info_text),
+                    ("轮换计数", "0"),
+                    ("下次轮换", f"{BET_MODE_INTERVAL} 局后自动切回跟随模式"),
+                ],
+                action=f"系统会在每{BET_MODE_INTERVAL}局自动轮换模式，也可用 `/mf` 切回跟随模式。",
+            )
+            log_event(logging.INFO, 'user_cmd', '切换到交替下注模式', user_id=user_ctx.user_id)
+            message = await send_to_admin(client, mes, user_ctx, global_config)
+            asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
+            if message:
+                asyncio.create_task(delete_later(client, message.chat_id, message.id, 30))
+            return
+        
+        # mf - 切换到跟随下注模式
+        if cmd == "mf":
+            rt["bet_mode"] = BET_MODE_FOLLOW
+            rt["bet_mode_round"] = 0
+            mode_info_text = "跟随模式：简单跟随上一手结果"
+            user_ctx.save_state()
+            mes = _build_ops_card(
+                "✅ 已切换到跟随下注模式",
+                fields=[
+                    ("当前模式", mode_info_text),
+                    ("轮换计数", "0"),
+                    ("下次轮换", f"{BET_MODE_INTERVAL} 局后自动切回交替模式"),
+                ],
+                action=f"系统会在每{BET_MODE_INTERVAL}局自动轮换模式，也可用 `/mt` 切换到交替模式。",
+            )
+            log_event(logging.INFO, 'user_cmd', '切换到跟随下注模式', user_id=user_ctx.user_id)
+            message = await send_to_admin(client, mes, user_ctx, global_config)
+            asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
+            if message:
+                asyncio.create_task(delete_later(client, message.chat_id, message.id, 30))
+            return
             await send_to_admin(
                 client,
                 _build_ops_card(
