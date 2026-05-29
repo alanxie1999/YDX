@@ -307,8 +307,6 @@ FIXED_PATTERNS = {
     "11010": {"follow": "reverse", "label": "11010反向下注"},
     "001010": {"follow": "same", "label": "001010同向下注"},
     "110101": {"follow": "same", "label": "110101同向下注"},
-    "10100": {"follow": "same", "duration": 2, "label": "10100 后续 2 次同向"},
-    "01011": {"follow": "same", "duration": 2, "label": "01011 后续 2 次同向"},
 }
 
 # 同手位防卡死：避免 SKIP/超时导致长期不落单
