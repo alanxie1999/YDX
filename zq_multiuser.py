@@ -242,6 +242,64 @@ AUTO_STATS_INTERVAL_ROUNDS = 10
 
 # 下注模式轮换配置
 BET_MODE_INTERVAL = 50  # 每 50 局轮换一次
+
+def _detect_disk_pattern(history: list, window: int = 10) -> str:
+    """
+    检测盘面特征，用于智能模式轮换
+    返回：'alternating' (交替), 'trending' (趋势), 'mixed' (混合)
+    """
+    if not isinstance(history, list) or len(history) < window:
+        return 'mixed'
+    
+    # 计算交替频率
+    alt_count = sum(1 for i in range(len(history)-window, len(history)-1) 
+                    if history[i] != history[i+1])
+    alt_rate = alt_count / (window - 1)
+    
+    # 检测尾部连庄
+    streak = 1
+    if len(history) >= 2:
+        tail = history[-1]
+        for i in range(len(history)-2, max(len(history)-window-1, -1), -1):
+            if history[i] != tail:
+                break
+            streak += 1
+    
+    if alt_rate >= 0.8:  # 80% 以上是交替
+        return 'alternating'
+    elif streak >= 4:  # 有 4 连以上
+        return 'trending'
+    else:
+        return 'mixed'
+
+
+def _should_smart_switch_mode(current_mode: str, history: list) -> tuple:
+    """
+    智能判断是否应该切换模式
+    返回：(should_switch, reason, new_mode)
+    """
+    if not isinstance(history, list) or len(history) < 10:
+        return False, '', current_mode
+    
+    pattern = _detect_disk_pattern(history)
+    
+    if current_mode == BET_MODE_FOLLOW:
+        # 跟随模式在持续交替时表现差，切换到交替模式
+        if pattern == 'alternating':
+            return True, f"盘面持续交替 ({pattern})，切交替模式", BET_MODE_ALTERNATION
+    
+    elif current_mode == BET_MODE_ALTERNATION:
+        # 交替模式在持续交替时表现差，改跟随
+        if pattern == 'alternating':
+            alt_count = sum(1 for i in range(len(history)-1, 0, -1) 
+                           if history[i] != history[i-1])
+        elif pattern == 'trending':
+            return True, f"长龙/趋势，跟随更优", BET_MODE_FOLLOW
+    
+    return False, '', current_mode
+
+
+
 BET_MODE_FOLLOW = "follow"  # 跟随模式
 BET_MODE_ALTERNATION = "alternation"  # 交替模式
 AUTO_STATS_DELETE_DELAY_SECONDS = 600
@@ -6505,8 +6563,26 @@ async def _process_settle_slim(client, event, user_ctx: UserContext, global_conf
             # 下注模式轮换计数
             bet_mode_interval = int(rt.get("bet_mode_interval", BET_MODE_INTERVAL))
             rt["bet_mode_round"] = rt.get("bet_mode_round", 0) + 1
-            if rt["bet_mode_round"] >= bet_mode_interval:
-                # 轮换下注模式
+            
+            # 智能模式轮换检测（优先级高于固定间隔）
+            should_switch, switch_reason, new_mode = _should_smart_switch_mode(
+                rt.get("bet_mode", BET_MODE_FOLLOW),
+                rt.get("_current_history", []) + rt.get("_history_cache", [])
+            )
+            
+            if should_switch:
+                old_mode = rt.get("bet_mode", BET_MODE_FOLLOW)
+                rt["bet_mode"] = new_mode
+                rt["bet_mode_round"] = 0
+                log_event(
+                    logging.INFO,
+                    'settle',
+                    '智能模式轮换',
+                    user_id=user_ctx.user_id,
+                    data=f"old={old_mode}, new={new_mode}, reason={switch_reason}"
+                )
+            elif rt["bet_mode_round"] >= bet_mode_interval:
+                # 固定间隔轮换（兜底）
                 old_mode = rt.get("bet_mode", BET_MODE_FOLLOW)
                 new_mode = BET_MODE_ALTERNATION if old_mode == BET_MODE_FOLLOW else BET_MODE_FOLLOW
                 rt["bet_mode"] = new_mode
