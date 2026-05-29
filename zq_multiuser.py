@@ -305,8 +305,6 @@ FIXED_PATTERNS = {
     "000000": {"follow": "0", "label": "小龙延续"},
     "00101": {"follow": "reverse", "label": "00101反向下注"},
     "11010": {"follow": "reverse", "label": "11010反向下注"},
-    "001010": {"follow": "same", "label": "001010同向下注"},
-    "110101": {"follow": "same", "label": "110101同向下注"},
 }
 
 # 同手位防卡死：避免 SKIP/超时导致长期不落单
