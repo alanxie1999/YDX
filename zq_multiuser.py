@@ -4381,21 +4381,8 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
         # 优先级 2: 交替模式检查（仅在 bet_mode=alternation 时生效）
         elif rt.get("bet_mode", BET_MODE_FOLLOW) == BET_MODE_ALTERNATION and len(history) >= 5:
             last_5 = "".join(str(x) for x in history[-5:])
-            
-            # 检测是否持续交替走势（连续 8 手以上交替）
-            is_persistent_alternation = False
-            if len(history) >= 10:
-                alt_count = 0
-                for i in range(len(history) - 1, 0, -1):
-                    if history[i] != history[i-1]:
-                        alt_count += 1
-                    else:
-                        break
-                if alt_count >= 8:  # 连续 8 手以上交替，判定为持续交替
-                    is_persistent_alternation = True
-            
-            if last_5 in ("10101", "01010") and not is_persistent_alternation:
-                # 交替模式：5 位纯交替时反向打破（持续交替时不反向）
+            if last_5 in ("10101", "01010"):
+                # 交替模式：5 位纯交替时反向打破
                 prediction = 1 - history[-1]
                 rt["last_predict_source"] = "alternation_mode"
                 rt["last_predict_tag"] = "ALTERNATION_MODE"
@@ -4404,13 +4391,12 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
                 log_event(logging.INFO, 'bet_on', '交替模式反向', user_id=user_ctx.user_id,
                           data=f"last_5={last_5}, history[-1]={history[-1]}, prediction={prediction}")
             else:
-                # 持续交替或非标形态：跟随上一手
+                # 否则跟随上一手
                 prediction = history[-1]
                 rt["last_predict_source"] = "follow_last"
                 rt["last_predict_tag"] = "FOLLOW_TREND"
                 rt["last_predict_confidence"] = 50
-                reason_text = "持续交替走势，跟随" if is_persistent_alternation else f"跟随上一手{history[-1]}"
-                rt["last_predict_reason"] = f"交替模式：{reason_text}，下{'大' if prediction == 1 else '小'}"
+                rt["last_predict_reason"] = f"交替模式：跟随上一手{history[-1]}，下{'大' if prediction == 1 else '小'}"
                 log_event(logging.INFO, 'bet_on', '交替模式跟随', user_id=user_ctx.user_id,
                           data=f"history[-1]={history[-1]}, prediction={prediction}")
         # 优先级 2: 5 位纯交替打破（跟随模式的旧逻辑，保留向后兼容）
