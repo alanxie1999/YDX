@@ -6071,7 +6071,9 @@ def _build_stats_report(state: UserState, windows: Optional[List[int]] = None) -
             if label <= 0 or label in labels:
                 continue
             labels.append(label)
-            snapshot = source_getter(label) if source_length >= label else {}
+            # 当数据不足时，使用实际数据长度进行统计，而不是返回空字典
+            actual = min(source_length, label)
+            snapshot = source_getter(actual) if actual > 0 else {}
             for category in categories:
                 bucket = snapshot.get(category, {}) if isinstance(snapshot, dict) else {}
                 section_stats[category].append(bucket)
