@@ -4970,13 +4970,13 @@ def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
         rt["alternation_break_active"] = False
         return 1000000
 
-    # 检查交替破局（5 位纯交替）
-    if len(history) >= 5:
-        last_5 = ''.join(str(x) for x in history[-5:])
-        if last_5 in ('01010', '10101'):
+    # 检查交替破局（6 位纯交替）
+    if len(history) >= 6:
+        last_6 = ''.join(str(x) for x in history[-6:])
+        if last_6 in ('010101', '101010'):
             rt["dragon_extra_active"] = True
             rt["alternation_break_active"] = True
-            rt["dragon_tail_streak"] = 5
+            rt["dragon_tail_streak"] = 6
             return 1000000
 
     # 持续加注：如果之前已激活，继续加注
