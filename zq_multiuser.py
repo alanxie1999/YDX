@@ -4904,10 +4904,16 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
 
 
 def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
-    """5 连以上长龙期间，每次下注额外加 1000000，直到不中后停止。"""
+    """
+    特殊形态额外加注：
+    - 5 连以上长龙：额外加 1000000
+    - 6 位纯交替破局：额外加 1000000
+    直到不中后停止。
+    """
     if rt.get("lose_count", 0) > 0:
         rt["dragon_extra_active"] = False
         rt["dragon_tail_streak"] = 0
+        rt["alternation_break_active"] = False
         # 不中时清除强制延续状态
         rt["forced_bet_remaining"] = 0
         rt["forced_bet_direction"] = 0
@@ -4924,13 +4930,24 @@ def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
         rt["dragon_extra_active"] = False
         return 0
 
+    # 检查长龙
     streak, _ = _get_history_tail_streak(history)
-
     if streak >= 5:
         rt["dragon_extra_active"] = True
         rt["dragon_tail_streak"] = streak
+        rt["alternation_break_active"] = False
         return 1000000
 
+    # 检查交替破局（6 位纯交替）
+    if len(history) >= 6:
+        last_6 = ''.join(str(x) for x in history[-6:])
+        if last_6 in ('010101', '101010'):
+            rt["dragon_extra_active"] = True
+            rt["alternation_break_active"] = True
+            rt["dragon_tail_streak"] = 6
+            return 1000000
+
+    # 持续加注：如果之前已激活，继续加注
     if rt.get("dragon_extra_active", False):
         return 1000000
 
