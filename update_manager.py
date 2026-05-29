@@ -637,41 +637,57 @@ def _auto_update_version_number(repo_root: Path) -> Dict[str, Any]:
     """
     自动更新版本号（基于 commit count）和日期。
     在更新到新版本后调用，确保版本号与发布版本一致。
+    自动提交变更，避免阻塞后续更新。
     """
     VERSION_FILE = repo_root / "zq_multiuser.py"
+    CONSTANTS_FILE = repo_root / "constants.py"
     if not VERSION_FILE.exists():
         return {"success": True, "reason": "版本文件不存在，跳过更新"}
     
     try:
-        content = VERSION_FILE.read_text(encoding="utf-8")
-        import re
-        
-        # 查找版本号行
-        version_match = re.search(r'^版本：(\d+\.\d+\.\d+)', content, re.MULTILINE)
-        if not version_match:
-            return {"success": True, "reason": "未找到版本号，跳过更新"}
-        
-        old_version = version_match.group(1)
-        
-        # 获取当前日期
+        import subprocess
         from datetime import datetime
+        
         current_date = datetime.now().strftime("%Y-%m-%d")
+        modified_files = []
         
-        # 更新版本号（minor 版本 +1）
-        parts = old_version.split(".")
-        new_version = f"{parts[0]}.{int(parts[1]) + 1}.{parts[2]}"
+        # 更新 zq_multiuser.py
+        for file_path in [VERSION_FILE, CONSTANTS_FILE]:
+            if not file_path.exists():
+                continue
+            
+            content = file_path.read_text(encoding="utf-8")
+            import re
+            
+            version_match = re.search(r'^版本：(\d+\.\d+\.\d+)', content, re.MULTILINE)
+            date_match = re.search(r'^日期：(\d{4}-\d{2}-\d{2})', content, re.MULTILINE)
+            
+            if version_match:
+                old_version = version_match.group(1)
+                parts = old_version.split(".")
+                new_version = f"{parts[0]}.{int(parts[1]) + 1}.{parts[2]}"
+                
+                new_content = re.sub(r'^版本：\d+\.\d+\.\d+', f"版本：{new_version}", content, flags=re.MULTILINE)
+                new_content = re.sub(r'^日期：\d{4}-\d{2}-\d{2}', f"日期：{current_date}", new_content, flags=re.MULTILINE)
+                
+                if new_content != content:
+                    file_path.write_text(new_content, encoding="utf-8")
+                    modified_files.append(str(file_path.relative_to(repo_root)))
         
-        # 替换版本号和日期
-        new_content = re.sub(r'^版本：\d+\.\d+\.\d+', f"版本：{new_version}", content, flags=re.MULTILINE)
-        new_content = re.sub(r'^日期：\d{4}-\d{2}-\d{2}', f"日期：{current_date}", new_content, flags=re.MULTILINE)
-        
-        if new_content != content:
-            VERSION_FILE.write_text(new_content, encoding="utf-8")
+        if modified_files:
+            # 自动提交变更
+            _run_cmd(["git", "config", "user.name", "update-manager"], str(repo_root), timeout=5)
+            _run_cmd(["git", "config", "user.email", "update-manager@local"], str(repo_root), timeout=5)
+            _run_cmd(["git", "add"] + modified_files, str(repo_root), timeout=10)
+            commit_res = _run_cmd(
+                ["git", "commit", "-m", f"chore: 自动更新版本号 ({current_date})"],
+                str(repo_root),
+                timeout=30
+            )
             return {
                 "success": True,
-                "old_version": old_version,
-                "new_version": new_version,
-                "date": current_date,
+                "modified_files": modified_files,
+                "commit_exit": commit_res.returncode,
             }
         
         return {"success": True, "reason": "版本无需更新"}
@@ -736,6 +752,10 @@ def _is_runtime_file(path: str) -> bool:
     if normalized in {"state.json", "account_funds.json", "MULTIUSER_TEST_RESULTS.json"}:
         return True
     if normalized.endswith(".default"):
+        return True
+    if normalized.startswith("users/_template/"):
+        return True
+    if normalized in {"users/_template/example_config.json"}:
         return True
     if normalized.endswith(".log"):
         return True
