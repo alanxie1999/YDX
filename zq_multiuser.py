@@ -5911,65 +5911,46 @@ async def _handle_goal_pause_after_settle(
     global_config: dict,
 ) -> bool:
     """
-    统一处理“炸号/盈利达成”触发的暂停。
+    统一处理"炸号/盈利达成"触发的暂停。
     仅做结构收敛，不改变原有阈值与重置语义。
+    注：盈利达成暂停功能已取消，仅保留炸号保护。
     """
     state = user_ctx.state
     rt = state.runtime
 
     explode_count = int(rt.get("explode_count", 0))
     explode = int(rt.get("explode", 5))
+    # 盈利达成暂停已取消，不再检查 period_profit >= profit_target
     period_profit = int(rt.get("period_profit", 0))
     profit_target = int(rt.get("profit", 1000000))
 
-    if not (explode_count >= explode or period_profit >= profit_target):
+    # 仅检查炸号保护
+    if not (explode_count >= explode):
         return False
 
     if not rt.get("flag", True):
         return False
     rt["flag"] = False
 
-    notify_type = "explode" if explode_count >= explode else "profit"
+    notify_type = "explode"
     log_event(logging.INFO, 'settle', '触发通知', user_id=user_ctx.user_id, data=f'type={notify_type}')
 
-    if notify_type == "profit":
-        date_str = datetime.now().strftime("%m月%d日")
-        current_round_str = f"{datetime.now().strftime('%Y%m%d')}_{rt.get('current_round', 1)}"
-        round_bet_count = sum(
-            1 for entry in state.bet_sequence_log
-            if str(entry.get("bet_id", "")).startswith(current_round_str)
-        )
-        win_msg = _build_success_ops_card(
-            "✅ 本轮盈利达成",
-            outcome="本轮已达到盈利条件，系统会按设定进入暂停观察。",
-            fields=[
-                ("轮次", f"{date_str} 第 {rt.get('current_round', 1)} 轮"),
-                ("收益", f"{period_profit / 10000:.2f} 万"),
-                ("共下注", f"{round_bet_count} 次"),
-            ],
-            action="建议查看 `status`，确认暂停局数和下一轮状态。",
-        )
-        await send_message_v2(client, "win", win_msg, user_ctx, global_config)
-    else:
-        explode_msg = _build_alert_ops_card(
-            "⚠️ 炸号保护已触发",
-            impact="当前轮次触发炸号保护，系统会立即暂停观察。",
-            fields=[
-                ("当前轮次", f"第 {rt.get('current_round', 1)} 轮"),
-                ("本轮收益", f"{period_profit / 10000:.2f} 万"),
-            ],
-            action="先看 `status`，确认暂停局数与当前资金状态。",
-        )
-        await send_message_v2(client, "explode", explode_msg, user_ctx, global_config)
+    # 炸号保护消息
+    explode_msg = _build_alert_ops_card(
+        "⚠️ 炸号保护已触发",
+        impact="当前轮次触发炸号保护，系统会立即暂停观察。",
+        fields=[
+            ("当前轮次", f"第 {rt.get('current_round', 1)} 轮"),
+            ("本轮收益", f"{period_profit / 10000:.2f} 万"),
+        ],
+        action="先看 `status`，确认暂停局数与当前资金状态。",
+    )
+    await send_message_v2(client, "explode", explode_msg, user_ctx, global_config)
 
-    configured_stop_rounds = int(rt.get("stop", 3) if notify_type == "explode" else rt.get("profit_stop", 5))
-    pause_reason = "炸号保护暂停" if notify_type == "explode" else "盈利达成暂停"
+    configured_stop_rounds = int(rt.get("explode", 5))
+    pause_reason = "炸号保护暂停"
     _enter_pause(rt, configured_stop_rounds, pause_reason)
     rt["bet_sequence_count"] = 0
-
-    if period_profit >= profit_target:
-        rt["current_round"] = int(rt.get("current_round", 1)) + 1
-        rt["current_bet_seq"] = 1
 
     rt["explode_count"] = 0
     rt["period_profit"] = 0
@@ -5986,10 +5967,10 @@ async def _handle_goal_pause_after_settle(
         account_balance_text = f"{account_balance_raw / 10000:.2f} 万"
     gambling_fund_text = f"{max(0, int(rt.get('gambling_fund', 0) or 0)) / 10000:.2f} 万"
     pause_msg = _build_alert_ops_card(
-        f"⛔ {'炸号保护暂停' if notify_type == 'explode' else '盈利达成暂停'}",
+        "⛔ 炸号保护暂停",
         impact="系统已进入目标暂停，当前策略状态会被保留，不会重置首注。",
         fields=[
-            ("原因", "被炸保护" if notify_type == 'explode' else "盈利达成"),
+            ("原因", "被炸保护"),
             ("本次暂停", f"{configured_stop_rounds} 局"),
             ("恢复提示", resume_hint),
             ("账户资金", account_balance_text),
@@ -6010,15 +5991,10 @@ async def _handle_goal_pause_after_settle(
         pause_msg,
         user_ctx,
         global_config,
-        title=f"菠菜机器人 {user_ctx.config.name} {'炸号' if notify_type == 'explode' else '盈利'}暂停",
+        title=f"菠菜机器人 {user_ctx.config.name} 炸号暂停",
         desp=pause_msg,
     )
-    await _refresh_pause_countdown_notice(
-        client,
-        user_ctx,
-        global_config,
-        remaining_rounds=configured_stop_rounds,
-    )
+
     return True
 
 
