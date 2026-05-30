@@ -241,7 +241,7 @@ except Exception:
 AUTO_STATS_INTERVAL_ROUNDS = 10
 
 # 下注模式轮换配置
-BET_MODE_INTERVAL = 10  # 每 10 局轮换一次
+BET_MODE_INTERVAL = 30  # 每 30 局轮换一次
 
 def _detect_disk_pattern(history: list, window: int = 10) -> str:
     """
