@@ -240,8 +240,9 @@ except Exception:
 # 自动统计推送节奏：每 10 局一次，保留 10 分钟后自动删除
 AUTO_STATS_INTERVAL_ROUNDS = 10
 
-# 下注模式轮换配置
-BET_MODE_INTERVAL = 30  # 每 30 局轮换一次
+# 下注模式配置
+BET_MODE_FOLLOW = "follow"
+BET_MODE_ALTERNATION = "alternation"
 
 def _detect_disk_pattern(history: list, window: int = 10) -> str:
     """
@@ -6524,11 +6525,7 @@ async def _process_settle_slim(client, event, user_ctx: UserContext, global_conf
             rt["lose_count"] = rt.get("lose_count", 0) + 1 if not win else 0
             rt["status"] = 1 if win else 0
             
-            # 下注模式轮换计数
-            bet_mode_interval = int(rt.get("bet_mode_interval", BET_MODE_INTERVAL))
-            rt["bet_mode_round"] = rt.get("bet_mode_round", 0) + 1
-            
-            # 智能模式轮换检测（优先级高于固定间隔）
+            # 智能模式轮换检测
             should_switch, switch_reason, new_mode = _should_smart_switch_mode(
                 rt.get("bet_mode", BET_MODE_FOLLOW),
                 rt.get("_current_history", []) + rt.get("_history_cache", [])
@@ -6537,26 +6534,12 @@ async def _process_settle_slim(client, event, user_ctx: UserContext, global_conf
             if should_switch:
                 old_mode = rt.get("bet_mode", BET_MODE_FOLLOW)
                 rt["bet_mode"] = new_mode
-                rt["bet_mode_round"] = 0
                 log_event(
                     logging.INFO,
                     'settle',
                     '智能模式轮换',
                     user_id=user_ctx.user_id,
                     data=f"old={old_mode}, new={new_mode}, reason={switch_reason}"
-                )
-            elif rt["bet_mode_round"] >= bet_mode_interval:
-                # 固定间隔轮换（兜底）
-                old_mode = rt.get("bet_mode", BET_MODE_FOLLOW)
-                new_mode = BET_MODE_ALTERNATION if old_mode == BET_MODE_FOLLOW else BET_MODE_FOLLOW
-                rt["bet_mode"] = new_mode
-                rt["bet_mode_round"] = 0
-                log_event(
-                    logging.INFO,
-                    'settle',
-                    '下注模式轮换',
-                    user_id=user_ctx.user_id,
-                    data=f"old={old_mode}, new={new_mode}, interval={bet_mode_interval}"
                 )
 
             settled_entry["result"] = result_text
@@ -7528,17 +7511,14 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
         # mt - 切换到交替下注模式
         if cmd == "mt":
             rt["bet_mode"] = BET_MODE_ALTERNATION
-            rt["bet_mode_round"] = 0
-            mode_info_text = "交替模式：5 位纯交替 (10101/01010) 时反向打破"
+            mode_info_text = "交替模式：5 位纯交替 (10101/01010) 时额外下注 100 万"
             user_ctx.save_state()
             mes = _build_ops_card(
                 "✅ 已切换到交替下注模式",
                 fields=[
                     ("当前模式", mode_info_text),
-                    ("轮换计数", "0"),
-                    ("下次轮换", f"{BET_MODE_INTERVAL} 局后自动切回跟随模式"),
                 ],
-                action=f"系统会在每{BET_MODE_INTERVAL}局自动轮换模式，也可用 `/mf` 切回跟随模式。",
+                action="智能检测交替盘面时自动切换，也可用 `/mf` 切回跟随模式。",
             )
             log_event(logging.INFO, 'user_cmd', '切换到交替下注模式', user_id=user_ctx.user_id)
             message = await send_to_admin(client, mes, user_ctx, global_config)
@@ -7550,17 +7530,14 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
         # mf - 切换到跟随下注模式
         if cmd == "mf":
             rt["bet_mode"] = BET_MODE_FOLLOW
-            rt["bet_mode_round"] = 0
             mode_info_text = "跟随模式：简单跟随上一手结果"
             user_ctx.save_state()
             mes = _build_ops_card(
                 "✅ 已切换到跟随下注模式",
                 fields=[
                     ("当前模式", mode_info_text),
-                    ("轮换计数", "0"),
-                    ("下次轮换", f"{BET_MODE_INTERVAL} 局后自动切回交替模式"),
                 ],
-                action=f"系统会在每{BET_MODE_INTERVAL}局自动轮换模式，也可用 `/mt` 切换到交替模式。",
+                action="智能检测长龙盘面时自动切换，也可用 `/mt` 切换到交替模式。",
             )
             log_event(logging.INFO, 'user_cmd', '切换到跟随下注模式', user_id=user_ctx.user_id)
             message = await send_to_admin(client, mes, user_ctx, global_config)
