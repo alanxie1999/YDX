@@ -7130,17 +7130,28 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 user_ctx.save_state()
                 
                 direction_label = {"same": "同向", "reverse": "反向", "auto": "跟随策略"}.get(bet_direction, bet_direction)
-                bet_note = "触发长龙或交替形态时额外加注 100 万"
-                mes = _build_ops_card(
-                    f"🎯 预设启动成功：{preset_name}",
-                    summary="当前账号已经切换到新的预设，后续将按这套参数进入可下注状态。",
-                    fields=[
-                        ("策略参数", f"{preset[0]} {preset[1]} {preset[2]} {preset[3]} {preset[4]} {preset[5]} {preset[6]}"),
-                        ("下注方向", direction_label),
-                        ("基础金额", f"{preset[6]} ({_format_money_message(int(preset[6]))})"),
-                        ("额外加注", bet_note),
-                    ],
-                    action="使用 `/st <preset_name>` 可切换到其他预设。",
+                
+                # 构建所有预设的下注金额列表
+                preset_lines = []
+                for name, params in sorted(presets.items()):
+                    base = int(params[6])
+                    max_amt = base + 1000000
+                    current_mark = " ← 当前" if name == preset_name else ""
+                    preset_lines.append(f"• <code>{name:6}</code>: {_format_money_message(base):>10} → {_format_money_message(max_amt):>12}{current_mark}")
+                
+                preset_table = "\n".join(preset_lines)
+                
+                mes = (
+                    f"<b>🎯 预设启动成功：{preset_name}</b>\n\n"
+                    f"<b>当前配置：</b>\n"
+                    f"• 下注方向：{direction_label}\n"
+                    f"• 基础金额：{_format_money_message(int(preset[6]))}\n"
+                    f"• 额外加注：触发长龙或交替形态时 +100 万\n\n"
+                    f"<b>📊 所有预设下注金额：</b>\n"
+                    f"{preset_table}\n\n"
+                    f"<b>说明：</b>\n"
+                    f"• 左侧为基础金额，右侧为触发额外加注后的总金额\n"
+                    f"• 使用 <code>/st [预设名]</code> 切换预设"
                 )
                 await send_to_admin(client, mes, user_ctx, global_config)
                 log_event(logging.INFO, 'user_cmd', 'st', user_id=user_ctx.user_id,
@@ -7168,22 +7179,32 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
             rt["bet"] = False  # 等待真实盘口触发下注
             user_ctx.save_state()
             
-            # 获取当前预设的下注金额
+            # 获取当前预设
             preset_name = rt.get("current_preset_name", "")
             current_amount = int(rt.get("bet_amount", rt.get("initial_amount", 500)))
             
-            bet_note = "触发长龙或交替形态时额外加注 100 万"
-            mes = _build_ops_card(
-                "🔄 已切换到交替模式",
-                summary="交替模式：反向下注（开 1 押 0，开 0 押 1）",
-                fields=[
-                    ("下注方向", "反向"),
-                    ("当前预设", preset_name or "未设置"),
-                    ("基础金额", f"{current_amount:,} ({_format_money_message(current_amount)})"),
-                    ("额外加注", bet_note),
-                    ("策略说明", "上一手开 1 则下注押 0，上一手开 0 则下注押 1"),
-                ],
-                action="使用 `/st 5k` 等预设命令可切换回跟随策略。",
+            # 构建所有预设的下注金额列表
+            preset_lines = []
+            for name, params in sorted(presets.items()):
+                base = int(params[6])
+                max_amt = base + 1000000
+                current_mark = " ← 当前" if name == preset_name else ""
+                preset_lines.append(f"• <code>{name:6}</code>: {_format_money_message(base):>10} → {_format_money_message(max_amt):>12}{current_mark}")
+            
+            preset_table = "\n".join(preset_lines)
+            
+            mes = (
+                f"<b>🔄 已切换到交替模式</b>\n\n"
+                f"<b>当前配置：</b>\n"
+                f"• 下注方向：反向（开 1 押 0，开 0 押 1）\n"
+                f"• 当前预设：{preset_name or '未设置'}\n"
+                f"• 基础金额：{_format_money_message(current_amount)}\n"
+                f"• 额外加注：触发长龙或交替形态时 +100 万\n\n"
+                f"<b>📊 所有预设下注金额：</b>\n"
+                f"{preset_table}\n\n"
+                f"<b>说明：</b>\n"
+                f"• 左侧为基础金额，右侧为触发额外加注后的总金额\n"
+                f"• 使用 <code>/st [预设名]</code> 切换回跟随策略"
             )
             await send_to_admin(client, mes, user_ctx, global_config)
             log_event(logging.INFO, 'user_cmd', 'mt', user_id=user_ctx.user_id,
