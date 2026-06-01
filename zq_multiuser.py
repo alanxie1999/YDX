@@ -7773,10 +7773,8 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                         
                         total_needed += current
                         
-                        if i <= 6 or i == lose_stop:
-                            lines.append(f"  第{i:2d}手：下注 {_format_money_message(current):>10} | 累计需 {_format_money_message(total_needed):>12} {mult_text}")
-                        elif i == 7:
-                            lines.append(f"  ...（中间省略 {lose_stop - 12} 手）")
+                        # 完整显示每一手，不省略
+                        lines.append(f"  第{i:2d}手：下注 {_format_money_message(current):>10} | 累计需 {_format_money_message(total_needed):>12} {mult_text}")
                     
                     # 最后汇总
                     lines.extend([
