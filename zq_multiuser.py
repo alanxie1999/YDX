@@ -295,10 +295,12 @@ HIGH_STEP_DOUBLE_CONFIRM_MODEL_TIMEOUT_SEC = 5.0
 
 # 固定数据规律：检测到特定序列后，按照规律下注
 FIXED_PATTERNS = {
-    "111111": {"follow": "1", "label": "大龙延续"},
-    "000000": {"follow": "0", "label": "小龙延续"},
+    "111111": {"follow": "1", "label": "6 位长龙"},
+    "000000": {"follow": "0", "label": "6 位长龙"},
     "010101": {"follow": "reverse", "label": "6 位交替"},
     "101010": {"follow": "reverse", "label": "6 位交替"},
+    "11111": {"follow": "1", "label": "5 连长龙"},
+    "00000": {"follow": "0", "label": "5 连长龙"},
 }
 
 # 同手位防卡死：避免 SKIP/超时导致长期不落单
@@ -4816,12 +4818,12 @@ def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
         rt["dragon_tail_streak"] = streak
         return 1000000
 
-    # 检查交替（5 位纯交替）
-    if len(history) >= 5:
-        last_5 = ''.join(str(x) for x in history[-5:])
-        if last_5 in ('01010', '10101'):
+    # 检查交替（6 位纯交替）
+    if len(history) >= 6:
+        last_6 = ''.join(str(x) for x in history[-6:])
+        if last_6 in ('010101', '101010'):
             rt["dragon_extra_active"] = True
-            rt["dragon_tail_streak"] = 5
+            rt["dragon_tail_streak"] = 6
             return 1000000
 
     return 0
