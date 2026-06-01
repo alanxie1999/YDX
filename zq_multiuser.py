@@ -7242,33 +7242,6 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
             log_event(logging.INFO, 'user_cmd', 'mt', user_id=user_ctx.user_id,
                       data="mode=alternation, direction=reverse")
             return
-                    action="建议留意本轮自动测算结果，并用 `status` 确认当前状态。",
-                )
-                log_event(logging.INFO, 'user_cmd', '启动预设', user_id=user_ctx.user_id, preset=preset_name)
-                message = await send_to_admin(client, mes, user_ctx, global_config)
-                asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
-                if message:
-                    asyncio.create_task(delete_later(client, message.chat_id, message.id, 10))
-                await yc_command_handler_multiuser(
-                    client,
-                    event,
-                    [preset_name],
-                    user_ctx,
-                    global_config,
-                    auto_trigger=True,
-                )
-            else:
-                await send_to_admin(
-                    client,
-                    _build_ops_card(
-                        "❌ 预设不存在",
-                        summary=f"当前账号没有找到名为 `{preset_name}` 的预设。",
-                        action="请先执行 `yss` 查看可用预设，或用 `ys` 新建一个预设。",
-                    ),
-                    user_ctx,
-                    global_config,
-                )
-            return
         
         # stats - 查看连大、连小、连输统计
         if cmd == "stats":
@@ -7411,18 +7384,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                     )
                 return
         
-        # 暂停/恢复等命令...
-                _build_ops_card(
-                    "❌ 目标金额设置失败",
-                    summary="当前参数数量不正确。",
-                    action="正确用法：`stf [数字]`，例如 `stf 100`。",
-                ),
-                user_ctx,
-                global_config,
-            )
-            return
-
-        # wlc - 设置连输告警阈值 - 与master一致
+        # wlc - 设置连输告警阈值 - 与 master 一致
         if cmd == "wlc":
             if len(my) > 1:
                 try:
