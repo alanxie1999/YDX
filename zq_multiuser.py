@@ -4886,8 +4886,9 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
 
 def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
     """
-    长龙额外加注：
+    特殊形态额外加注：
     - 5 连以上长龙：额外加 1000000
+    - 5 位纯交替：额外加 1000000
     直到不中后停止。
     """
     if rt.get("lose_count", 0) > 0:
@@ -4915,6 +4916,14 @@ def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
         rt["dragon_extra_active"] = True
         rt["dragon_tail_streak"] = streak
         return 1000000
+
+    # 检查交替（5 位纯交替）
+    if len(history) >= 5:
+        last_5 = ''.join(str(x) for x in history[-5:])
+        if last_5 in ('01010', '10101'):
+            rt["dragon_extra_active"] = True
+            rt["dragon_tail_streak"] = 5
+            return 1000000
 
     return 0
 
