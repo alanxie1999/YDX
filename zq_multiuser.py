@@ -7131,23 +7131,29 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 
                 direction_label = {"same": "同向", "reverse": "反向", "auto": "跟随策略"}.get(bet_direction, bet_direction)
                 
-                # 显示当前预设的下注金额配置
+                # 计算每一手的下注金额
                 base_amount = int(preset[6])
                 lose_once_amt = int(base_amount * float(preset[2]))
                 lose_twice_amt = int(base_amount * float(preset[3]))
                 lose_three_amt = int(base_amount * float(preset[4]))
                 lose_four_amt = int(base_amount * float(preset[5]))
                 
+                bet_hands = (
+                    f"• 第 1 手：{_format_money_message(base_amount)}\n"
+                    f"• 第 2 手：{_format_money_message(base_amount)}\n"
+                    f"• 第 3 手（1 输）：{_format_money_message(lose_once_amt)}\n"
+                    f"• 第 4 手（2 输）：{_format_money_message(lose_twice_amt)}\n"
+                    f"• 第 5 手（3 输）：{_format_money_message(lose_three_amt)}\n"
+                    f"• 第 6 手（4 输）：{_format_money_message(lose_four_amt)}"
+                )
+                
                 mes = (
                     f"<b>🎯 预设启动成功：{preset_name}</b>\n\n"
                     f"<b>当前配置：</b>\n"
                     f"• 下注方向：{direction_label}\n"
-                    f"• 首注金额：{_format_money_message(base_amount)}\n"
-                    f"• 1 输下注：{_format_money_message(lose_once_amt)}\n"
-                    f"• 2 输下注：{_format_money_message(lose_twice_amt)}\n"
-                    f"• 3 输下注：{_format_money_message(lose_three_amt)}\n"
-                    f"• 4 输下注：{_format_money_message(lose_four_amt)}\n"
                     f"• 额外加注：触发长龙或交替形态时 +100 万\n\n"
+                    f"<b>📊 下注金额（每手）：</b>\n"
+                    f"{bet_hands}\n\n"
                     f"使用 <code>/st [预设名]</code> 切换预设"
                 )
                 await send_to_admin(client, mes, user_ctx, global_config)
@@ -7180,33 +7186,42 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
             preset_name = rt.get("current_preset_name", "")
             preset = presets.get(preset_name)
             
-            # 计算各手下注金额
             if preset:
+                # 计算每一手的下注金额
                 base_amount = int(preset[6])
                 lose_once_amt = int(base_amount * float(preset[2]))
                 lose_twice_amt = int(base_amount * float(preset[3]))
                 lose_three_amt = int(base_amount * float(preset[4]))
                 lose_four_amt = int(base_amount * float(preset[5]))
                 
-                amount_text = (
-                    f"• 首注金额：{_format_money_message(base_amount)}\n"
-                    f"• 1 输下注：{_format_money_message(lose_once_amt)}\n"
-                    f"• 2 输下注：{_format_money_message(lose_twice_amt)}\n"
-                    f"• 3 输下注：{_format_money_message(lose_three_amt)}\n"
-                    f"• 4 输下注：{_format_money_message(lose_four_amt)}"
+                bet_hands = (
+                    f"• 第 1 手：{_format_money_message(base_amount)}\n"
+                    f"• 第 2 手：{_format_money_message(base_amount)}\n"
+                    f"• 第 3 手（1 输）：{_format_money_message(lose_once_amt)}\n"
+                    f"• 第 4 手（2 输）：{_format_money_message(lose_twice_amt)}\n"
+                    f"• 第 5 手（3 输）：{_format_money_message(lose_three_amt)}\n"
+                    f"• 第 6 手（4 输）：{_format_money_message(lose_four_amt)}"
+                )
+                
+                mes = (
+                    f"<b>🔄 已切换到交替模式</b>\n\n"
+                    f"<b>当前配置：</b>\n"
+                    f"• 下注方向：反向（开 1 押 0，开 0 押 1）\n"
+                    f"• 当前预设：{preset_name}\n"
+                    f"• 额外加注：触发长龙或交替形态时 +100 万\n\n"
+                    f"<b>📊 下注金额（每手）：</b>\n"
+                    f"{bet_hands}\n\n"
+                    f"使用 <code>/st [预设名]</code> 切换回跟随策略"
                 )
             else:
-                amount_text = "• 当前未设置预设，请先执行 /st [预设名]"
+                mes = (
+                    f"<b>🔄 已切换到交替模式</b>\n\n"
+                    f"当前未设置预设，请先执行 <code>/st [预设名]</code>\n\n"
+                    f"交替模式说明：\n"
+                    f"• 下注方向：反向（开 1 押 0，开 0 押 1）\n"
+                    f"• 额外加注：触发长龙或交替形态时 +100 万"
+                )
             
-            mes = (
-                f"<b>🔄 已切换到交替模式</b>\n\n"
-                f"<b>当前配置：</b>\n"
-                f"• 下注方向：反向（开 1 押 0，开 0 押 1）\n"
-                f"• 当前预设：{preset_name or '未设置'}\n"
-                f"{amount_text}\n"
-                f"• 额外加注：触发长龙或交替形态时 +100 万\n\n"
-                f"使用 <code>/st [预设名]</code> 切换回跟随策略"
-            )
             await send_to_admin(client, mes, user_ctx, global_config)
             log_event(logging.INFO, 'user_cmd', 'mt', user_id=user_ctx.user_id,
                       data="mode=alternation, direction=reverse")
