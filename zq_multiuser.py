@@ -1923,7 +1923,8 @@ def _build_help_card() -> str:
         "• <code>/res state</code> 重置状态（包括大路历史）\n"
         "• <code>/res bet</code> 重置押注策略（连押链路清零）\n\n"
         "<b>📋 预设管理</b>\n"
-        "• <code>/ysz</code> 查看所有预设的完整倍投序列\n"
+        "• <code>/ysz [预设名]</code> 查看指定预设的完整倍投序列\n"
+        "• <code>/ysz</code> 查看所有预设的倍投序列\n"
         "• <code>/yss</code> 查看预设列表\n"
         "• <code>/ys [名称]</code> 按预设测算\n\n"
         "<b>🛠 系统</b>\n"
@@ -7730,45 +7731,98 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
         
         # ========== 预设管理命令 ==========
         # ysz - 查看所有预设的下注金额（完整倍投序列）
+        # ysz - 查看预设的完整倍投序列（支持指定预设名）
         if cmd == "ysz":
-            lines = []
-            for name in sorted(presets.keys()):
-                params = presets[name]
-                base = int(params[6])
-                lose_once = int(base * float(params[2]))
-                lose_twice = int(base * float(params[3]))
-                lose_three = int(base * float(params[4]))
-                lose_four = int(base * float(params[5]))
-                lose_stop = int(params[1])
+            if len(my) > 1:
+                # 查看指定预设
+                target_preset = my[1]
+                if target_preset not in presets:
+                    preset_list = ", ".join(sorted(presets.keys()))
+                    mes = (
+                        f"<b>❌ 预设不存在：{target_preset}</b>\n\n"
+                        f"• 可用预设：{preset_list}\n\n"
+                        f"执行 <code>/ysz</code> 查看所有预设，或 <code>/ysz [预设名]</code> 查看指定预设"
+                    )
+                else:
+                    params = presets[target_preset]
+                    base = int(params[6])
+                    lose_once = int(base * float(params[2]))
+                    lose_twice = int(base * float(params[3]))
+                    lose_three = int(base * float(params[4]))
+                    lose_four = int(base * float(params[5]))
+                    lose_stop = int(params[1])
+                    
+                    lines = [
+                        f"<b>【{target_preset}】预设（最多连投 {lose_stop} 手）</b>",
+                        f"  第 1 手：{_format_money_message(base)}（首注）",
+                        f"  第 2 手：{_format_money_message(base)}（连赢继续）",
+                        f"  第 3 手：{_format_money_message(lose_once)}（1 输）",
+                        f"  第 4 手：{_format_money_message(lose_twice)}（2 输）",
+                        f"  第 5 手：{_format_money_message(lose_three)}（3 输）",
+                        f"  第 6 手：{_format_money_message(lose_four)}（4 输）",
+                    ]
+                    
+                    # 后续手数
+                    for i in range(7, lose_stop + 1):
+                        lines.append(f"  第{i}手：{_format_money_message(lose_four)}（4 输后持续）")
+                    
+                    lines.extend([
+                        "",
+                        "<b>💡 说明：</b>",
+                        "• 前 2 手为首注金额，未输则继续",
+                        "• 第 3 手开始进入倍投，按输的次数应用不同系数",
+                        "• 第 6 手起固定使用 4 输系数持续",
+                        "• 触发长龙 5 连或交替 5 位时额外加注 100 万",
+                    ])
+                    
+                    mes = "\n".join(lines)
                 
-                lines.append(f"<b>【{name}】预设（最多连投 {lose_stop} 手）</b>")
-                lines.append(f"  第 1 手：{_format_money_message(base)}（首注）")
-                lines.append(f"  第 2 手：{_format_money_message(base)}（连赢继续）")
-                lines.append(f"  第 3 手：{_format_money_message(lose_once)}（1 输）")
-                lines.append(f"  第 4 手：{_format_money_message(lose_twice)}（2 输）")
-                lines.append(f"  第 5 手：{_format_money_message(lose_three)}（3 输）")
-                lines.append(f"  第 6 手：{_format_money_message(lose_four)}（4 输）")
+                message = await send_to_admin(client, mes, user_ctx, global_config)
+                asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
+                if message:
+                    asyncio.create_task(delete_later(client, message.chat_id, message.id, 120))
+                log_event(logging.INFO, 'user_cmd', 'ysz', user_id=user_ctx.user_id, preset=target_preset)
+            else:
+                # 查看所有预设
+                lines = []
+                for name in sorted(presets.keys()):
+                    params = presets[name]
+                    base = int(params[6])
+                    lose_once = int(base * float(params[2]))
+                    lose_twice = int(base * float(params[3]))
+                    lose_three = int(base * float(params[4]))
+                    lose_four = int(base * float(params[5]))
+                    lose_stop = int(params[1])
+                    
+                    lines.append(f"<b>【{name}】预设（最多连投 {lose_stop} 手）</b>")
+                    lines.append(f"  第 1 手：{_format_money_message(base)}（首注）")
+                    lines.append(f"  第 2 手：{_format_money_message(base)}（连赢继续）")
+                    lines.append(f"  第 3 手：{_format_money_message(lose_once)}（1 输）")
+                    lines.append(f"  第 4 手：{_format_money_message(lose_twice)}（2 输）")
+                    lines.append(f"  第 5 手：{_format_money_message(lose_three)}（3 输）")
+                    lines.append(f"  第 6 手：{_format_money_message(lose_four)}（4 输）")
+                    
+                    # 后续手数
+                    for i in range(7, lose_stop + 1):
+                        lines.append(f"  第{i}手：{_format_money_message(lose_four)}（4 输后持续）")
+                    
+                    lines.append("")
                 
-                # 后续手数
-                for i in range(7, lose_stop + 1):
-                    lines.append(f"  第{i}手：{_format_money_message(lose_four)}（4 输后持续）")
-                
-                lines.append("")
-            
-            mes = (
-                "<b>📊 所有预设倍投下注金额一览</b>\n\n"
-                + "\n".join(lines) +
-                "<b>💡 说明：</b>\n"
-                "• 前 2 手为首注金额，未输则继续\n"
-                "• 第 3 手开始进入倍投，按输的次数应用不同系数\n"
-                "• 第 6 手起固定使用 4 输系数持续\n"
-                "• 触发长龙 5 连或交替 5 位时额外加注 100 万"
-            )
-            message = await send_to_admin(client, mes, user_ctx, global_config)
-            asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
-            if message:
-                asyncio.create_task(delete_later(client, message.chat_id, message.id, 120))
-            log_event(logging.INFO, 'user_cmd', 'ysz', user_id=user_ctx.user_id)
+                mes = (
+                    "<b>📊 所有预设倍投下注金额一览</b>\n\n"
+                    + "\n".join(lines) +
+                    "<b>💡 说明：</b>\n"
+                    "• 前 2 手为首注金额，未输则继续\n"
+                    "• 第 3 手开始进入倍投，按输的次数应用不同系数\n"
+                    "• 第 6 手起固定使用 4 输系数持续\n"
+                    "• 触发长龙 5 连或交替 5 位时额外加注 100 万\n\n"
+                    "执行 <code>/ysz [预设名]</code> 查看指定预设"
+                )
+                message = await send_to_admin(client, mes, user_ctx, global_config)
+                asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
+                if message:
+                    asyncio.create_task(delete_later(client, message.chat_id, message.id, 120))
+                log_event(logging.INFO, 'user_cmd', 'ysz', user_id=user_ctx.user_id)
             return
         
         # yss - 查看预设列表（简化版）
