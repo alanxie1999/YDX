@@ -7790,7 +7790,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                     del presets[preset_name]
                     user_ctx.save_presets()
                     mes = _build_ops_card(
-                        f"✅ 预设删除成功: {preset_name}",
+                        f"✅ 预设删除成功：{preset_name}",
                         summary="该预设已经从当前账号配置中移除。",
                         action="建议执行 `yss` 再确认剩余预设。",
                     )
@@ -7807,11 +7807,23 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 if message:
                     asyncio.create_task(delete_later(client, message.chat_id, message.id, 10))
             else:
-                # 查看所有预设
+                # 查看所有预设（带下注金额）
                 if len(presets) > 0:
-                    max_key_length = max(len(str(k)) for k in presets.keys())
-                    preset_lines = "\n".join(f"'{k.ljust(max_key_length)}': {v}" for k, v in presets.items())
-                    mes = f"📚 当前预设列表\n\n{preset_lines}"
+                    lines = []
+                    for name, params in sorted(presets.items()):
+                        base_amount = int(params[6])
+                        max_amount = base_amount + 1000000
+                        line = f"<code>{name:6}</code> → 基础：{_format_money_message(base_amount):>10} | 最高：{_format_money_message(max_amount):>12} (含额外 100 万)"
+                        lines.append(line)
+                    
+                    preset_table = "\n".join(lines)
+                    mes = (
+                        "<b>📚 预设下注金额一览</b>\n\n"
+                        f"{preset_table}\n\n"
+                        "<b>说明：</b>\n"
+                        "• 基础金额：预设配置的初始下注金额\n"
+                        "• 最高金额：触发长龙 5 连或交替 5 位时的总下注（基础 +100 万）"
+                    )
                     log_event(logging.INFO, 'user_cmd', '查看预设', user_id=user_ctx.user_id)
                 else:
                     mes = _build_ops_card(
@@ -7821,9 +7833,9 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                     )
                     log_event(logging.INFO, 'user_cmd', '暂无预设', user_id=user_ctx.user_id)
                 message = await send_to_admin(client, mes, user_ctx, global_config)
-                asyncio.create_task(delete_later(client, event.chat_id, event.id, 60))
+                asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
                 if message:
-                    asyncio.create_task(delete_later(client, message.chat_id, message.id, 60))
+                    asyncio.create_task(delete_later(client, message.chat_id, message.id, 120))
             return
         
         # ========== 测算命令 ==========
