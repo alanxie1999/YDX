@@ -4781,8 +4781,13 @@ def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
     - 5 连以上长龙：额外加 1000000
     - 5 位纯交替：额外加 1000000
     直到不中后停止。
+    
+    注意：交替模式（bet_direction=reverse）下即使输了也继续触发额外加注。
     """
-    if rt.get("lose_count", 0) > 0:
+    # 跟随模式：不中后重置额外加注
+    # 交替模式：即使输了也继续触发额外加注
+    is_reverse_mode = rt.get("bet_direction") == "reverse"
+    if rt.get("lose_count", 0) > 0 and not is_reverse_mode:
         rt["dragon_extra_active"] = False
         rt["dragon_tail_streak"] = 0
         # 不中时清除强制延续状态
