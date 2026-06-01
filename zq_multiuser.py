@@ -1923,7 +1923,8 @@ def _build_help_card() -> str:
         "• <code>/res state</code> 重置状态（包括大路历史）\n"
         "• <code>/res bet</code> 重置押注策略（连押链路清零）\n\n"
         "<b>📋 预设管理</b>\n"
-        "• <code>/yss</code> 查看全部预设\n"
+        "• <code>/ysz</code> 查看所有预设的完整倍投序列\n"
+        "• <code>/yss</code> 查看预设列表\n"
         "• <code>/ys [名称]</code> 按预设测算\n\n"
         "<b>🛠 系统</b>\n"
         "• <code>/ver</code> 查看版本\n"
@@ -7804,53 +7805,49 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
             return
         
         # ========== 预设管理命令 ==========
-        # ys - 保存预设 - 与master一致
-        if cmd == "ys" and len(my) >= 9:
-            try:
-                preset_name = my[1]
-                ys = [int(my[2]), int(my[3]), float(my[4]), float(my[5]), float(my[6]), float(my[7]), int(my[8])]
-                presets[preset_name] = ys
-                user_ctx.save_presets()
-                rt["current_preset_name"] = preset_name
-                user_ctx.save_state()
-                mes = _build_ops_card(
-                    f"✅ 预设保存成功: {preset_name}",
-                    summary="新的预设参数已经写入当前账号，并设置为当前预设。",
-                    fields=[("策略参数", f"{ys[0]} {ys[1]} {ys[2]} {ys[3]} {ys[4]} {ys[5]} {ys[6]}")],
-                    action=f"建议执行 `st {preset_name}` 或 `status` 确认当前状态。",
-                )
-                log_event(logging.INFO, 'user_cmd', '保存预设策略', user_id=user_ctx.user_id, preset=preset_name, params=ys)
-                message = await send_to_admin(client, mes, user_ctx, global_config)
-                asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
-                if message:
-                    asyncio.create_task(delete_later(client, message.chat_id, message.id, 10))
-            except (ValueError, IndexError) as e:
-                await send_to_admin(
-                    client,
-                    _build_ops_card(
-                        "❌ 预设保存失败",
-                        summary="参数格式不正确，当前预设没有写入。",
-                        fields=[("错误", str(e)[:180])],
-                        action="请按 `ys [名] ...` 的格式重新输入完整参数。",
-                    ),
-                    user_ctx,
-                    global_config,
-                )
-            return
-        if cmd == "ys":
-            await send_to_admin(
-                client,
-                _build_ops_card(
-                    "❌ 预设保存失败",
-                    summary="当前参数数量不足，预设没有写入。",
-                    action="请按 `ys [名] [连续] [停] [倍1] [倍2] [倍3] [倍4] [首注]` 重新输入。",
-                ),
-                user_ctx,
-                global_config,
+        # ysz - 查看所有预设的下注金额（完整倍投序列）
+        if cmd == "ysz":
+            lines = []
+            for name in sorted(presets.keys()):
+                params = presets[name]
+                base = int(params[6])
+                lose_once = int(base * float(params[2]))
+                lose_twice = int(base * float(params[3]))
+                lose_three = int(base * float(params[4]))
+                lose_four = int(base * float(params[5]))
+                lose_stop = int(params[1])
+                
+                lines.append(f"<b>【{name}】预设（最多连投 {lose_stop} 手）</b>")
+                lines.append(f"  第 1 手：{_format_money_message(base)}（首注）")
+                lines.append(f"  第 2 手：{_format_money_message(base)}（连赢继续）")
+                lines.append(f"  第 3 手：{_format_money_message(lose_once)}（1 输）")
+                lines.append(f"  第 4 手：{_format_money_message(lose_twice)}（2 输）")
+                lines.append(f"  第 5 手：{_format_money_message(lose_three)}（3 输）")
+                lines.append(f"  第 6 手：{_format_money_message(lose_four)}（4 输）")
+                
+                # 后续手数
+                for i in range(7, lose_stop + 1):
+                    lines.append(f"  第{i}手：{_format_money_message(lose_four)}（4 输后持续）")
+                
+                lines.append("")
+            
+            mes = (
+                "<b>📊 所有预设倍投下注金额一览</b>\n\n"
+                + "\n".join(lines) +
+                "<b>💡 说明：</b>\n"
+                "• 前 2 手为首注金额，未输则继续\n"
+                "• 第 3 手开始进入倍投，按输的次数应用不同系数\n"
+                "• 第 6 手起固定使用 4 输系数持续\n"
+                "• 触发长龙 5 连或交替 5 位时额外加注 100 万"
             )
+            message = await send_to_admin(client, mes, user_ctx, global_config)
+            asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
+            if message:
+                asyncio.create_task(delete_later(client, message.chat_id, message.id, 120))
+            log_event(logging.INFO, 'user_cmd', 'ysz', user_id=user_ctx.user_id)
             return
         
-        # yss - 查看/删除预设 - 与master一致
+        # yss - 查看预设列表（简化版）
         if cmd == "yss":
             if len(my) > 2 and my[1] == "dl":
                 # 删除预设
