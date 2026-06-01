@@ -7444,7 +7444,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 fields=[
                     ("当前模式", mode_info_text),
                 ],
-                action="智能检测交替盘面时自动切换，也可用 `/mf` 切回跟随模式。",
+                action="使用 `/mf` 可切回跟随模式。",
             )
             log_event(logging.INFO, 'user_cmd', '切换到交替下注模式', user_id=user_ctx.user_id)
             message = await send_to_admin(client, mes, user_ctx, global_config)
@@ -7463,7 +7463,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 fields=[
                     ("当前模式", mode_info_text),
                 ],
-                action="智能检测长龙盘面时自动切换，也可用 `/mt` 切换到交替模式。",
+                action="使用 `/mt` 可切换到交替模式。",
             )
             log_event(logging.INFO, 'user_cmd', '切换到跟随下注模式', user_id=user_ctx.user_id)
             message = await send_to_admin(client, mes, user_ctx, global_config)
