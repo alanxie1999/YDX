@@ -7131,39 +7131,24 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 
                 direction_label = {"same": "同向", "reverse": "反向", "auto": "跟随策略"}.get(bet_direction, bet_direction)
                 
-                # 构建所有预设的下注金额列表
-                preset_lines = []
-                for name, params in sorted(presets.items()):
-                    base = int(params[6])
-                    max_amt = base + 1000000
-                    # 基础金额：小额显示数字，大额显示万
-                    if base >= 10000:
-                        base_str = f"{base/10000:.1f}万"
-                    else:
-                        base_str = f"{base:,}"
-                    max_str = f"{max_amt/10000:.1f}万"
-                    current_mark = " ← 当前" if name == preset_name else ""
-                    preset_lines.append(f"• <code>{name:6}</code>: {base_str:>10} → {max_str:>12}{current_mark}")
-                
-                preset_table = "\n".join(preset_lines)
-                
-                # 当前基础金额格式化
-                if int(preset[6]) >= 10000:
-                    current_base_str = f"{int(preset[6])/10000:.1f}万"
-                else:
-                    current_base_str = f"{int(preset[6]):,}"
+                # 显示当前预设的下注金额配置
+                base_amount = int(preset[6])
+                lose_once_amt = int(base_amount * float(preset[2]))
+                lose_twice_amt = int(base_amount * float(preset[3]))
+                lose_three_amt = int(base_amount * float(preset[4]))
+                lose_four_amt = int(base_amount * float(preset[5]))
                 
                 mes = (
                     f"<b>🎯 预设启动成功：{preset_name}</b>\n\n"
                     f"<b>当前配置：</b>\n"
                     f"• 下注方向：{direction_label}\n"
-                    f"• 基础金额：{current_base_str}\n"
+                    f"• 首注金额：{_format_money_message(base_amount)}\n"
+                    f"• 1 输下注：{_format_money_message(lose_once_amt)}\n"
+                    f"• 2 输下注：{_format_money_message(lose_twice_amt)}\n"
+                    f"• 3 输下注：{_format_money_message(lose_three_amt)}\n"
+                    f"• 4 输下注：{_format_money_message(lose_four_amt)}\n"
                     f"• 额外加注：触发长龙或交替形态时 +100 万\n\n"
-                    f"<b>📊 所有预设下注金额：</b>\n"
-                    f"{preset_table}\n\n"
-                    f"<b>说明：</b>\n"
-                    f"• 左侧为基础金额，右侧为触发额外加注后的总金额\n"
-                    f"• 使用 <code>/st [预设名]</code> 切换预设"
+                    f"使用 <code>/st [预设名]</code> 切换预设"
                 )
                 await send_to_admin(client, mes, user_ctx, global_config)
                 log_event(logging.INFO, 'user_cmd', 'st', user_id=user_ctx.user_id,
@@ -7193,42 +7178,34 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
             
             # 获取当前预设
             preset_name = rt.get("current_preset_name", "")
-            current_amount = int(rt.get("bet_amount", rt.get("initial_amount", 500)))
+            preset = presets.get(preset_name)
             
-            # 当前基础金额格式化
-            if current_amount >= 10000:
-                current_base_str = f"{current_amount/10000:.1f}万"
+            # 计算各手下注金额
+            if preset:
+                base_amount = int(preset[6])
+                lose_once_amt = int(base_amount * float(preset[2]))
+                lose_twice_amt = int(base_amount * float(preset[3]))
+                lose_three_amt = int(base_amount * float(preset[4]))
+                lose_four_amt = int(base_amount * float(preset[5]))
+                
+                amount_text = (
+                    f"• 首注金额：{_format_money_message(base_amount)}\n"
+                    f"• 1 输下注：{_format_money_message(lose_once_amt)}\n"
+                    f"• 2 输下注：{_format_money_message(lose_twice_amt)}\n"
+                    f"• 3 输下注：{_format_money_message(lose_three_amt)}\n"
+                    f"• 4 输下注：{_format_money_message(lose_four_amt)}"
+                )
             else:
-                current_base_str = f"{current_amount:,}"
-            
-            # 构建所有预设的下注金额列表
-            preset_lines = []
-            for name, params in sorted(presets.items()):
-                base = int(params[6])
-                max_amt = base + 1000000
-                # 基础金额：小额显示数字，大额显示万
-                if base >= 10000:
-                    base_str = f"{base/10000:.1f}万"
-                else:
-                    base_str = f"{base:,}"
-                max_str = f"{max_amt/10000:.1f}万"
-                current_mark = " ← 当前" if name == preset_name else ""
-                preset_lines.append(f"• <code>{name:6}</code>: {base_str:>10} → {max_str:>12}{current_mark}")
-            
-            preset_table = "\n".join(preset_lines)
+                amount_text = "• 当前未设置预设，请先执行 /st [预设名]"
             
             mes = (
                 f"<b>🔄 已切换到交替模式</b>\n\n"
                 f"<b>当前配置：</b>\n"
                 f"• 下注方向：反向（开 1 押 0，开 0 押 1）\n"
                 f"• 当前预设：{preset_name or '未设置'}\n"
-                f"• 基础金额：{current_base_str}\n"
+                f"{amount_text}\n"
                 f"• 额外加注：触发长龙或交替形态时 +100 万\n\n"
-                f"<b>📊 所有预设下注金额：</b>\n"
-                f"{preset_table}\n\n"
-                f"<b>说明：</b>\n"
-                f"• 左侧为基础金额，右侧为触发额外加注后的总金额\n"
-                f"• 使用 <code>/st [预设名]</code> 切换回跟随策略"
+                f"使用 <code>/st [预设名]</code> 切换回跟随策略"
             )
             await send_to_admin(client, mes, user_ctx, global_config)
             log_event(logging.INFO, 'user_cmd', 'mt', user_id=user_ctx.user_id,
