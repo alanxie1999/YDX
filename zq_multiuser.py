@@ -7131,29 +7131,45 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 
                 direction_label = {"same": "同向", "reverse": "反向", "auto": "跟随策略"}.get(bet_direction, bet_direction)
                 
-                # 计算每一手的下注金额
+                # 计算每一手的下注金额（倍投序列）
                 base_amount = int(preset[6])
                 lose_once_amt = int(base_amount * float(preset[2]))
                 lose_twice_amt = int(base_amount * float(preset[3]))
                 lose_three_amt = int(base_amount * float(preset[4]))
                 lose_four_amt = int(base_amount * float(preset[5]))
                 
-                bet_hands = (
-                    f"• 第 1 手：{_format_money_message(base_amount)}\n"
-                    f"• 第 2 手：{_format_money_message(base_amount)}\n"
-                    f"• 第 3 手（1 输）：{_format_money_message(lose_once_amt)}\n"
-                    f"• 第 4 手（2 输）：{_format_money_message(lose_twice_amt)}\n"
-                    f"• 第 5 手（3 输）：{_format_money_message(lose_three_amt)}\n"
-                    f"• 第 6 手（4 输）：{_format_money_message(lose_four_amt)}"
-                )
+                bet_amounts = [
+                    base_amount,  # 第 1 手
+                    base_amount,  # 第 2 手
+                    lose_once_amt,  # 第 3 手（1 输）
+                    lose_twice_amt,  # 第 4 手（2 输）
+                    lose_three_amt,  # 第 5 手（3 输）
+                    lose_four_amt,  # 第 6 手（4 输）
+                ]
+                
+                bet_lines = []
+                for i, amt in enumerate(bet_amounts, 1):
+                    note = ""
+                    if i == 1:
+                        note = "（首注）"
+                    elif i == 2:
+                        note = "（连赢继续）"
+                    elif i >= 3:
+                        note = f"（{i-2}输）"
+                    bet_lines.append(f"• 第{i}手：{_format_money_message(amt)} {note}")
+                
+                # 4 输后的持续金额说明
+                bet_lines.append(f"• 7 手起：{_format_money_message(lose_four_amt)}（4 输后持续）")
+                
+                bet_text = "\n".join(bet_lines)
                 
                 mes = (
                     f"<b>🎯 预设启动成功：{preset_name}</b>\n\n"
                     f"<b>当前配置：</b>\n"
                     f"• 下注方向：{direction_label}\n"
                     f"• 额外加注：触发长龙或交替形态时 +100 万\n\n"
-                    f"<b>📊 下注金额（每手）：</b>\n"
-                    f"{bet_hands}\n\n"
+                    f"<b>📊 倍投下注金额：</b>\n"
+                    f"{bet_text}\n\n"
                     f"使用 <code>/st [预设名]</code> 切换预设"
                 )
                 await send_to_admin(client, mes, user_ctx, global_config)
@@ -7187,21 +7203,37 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
             preset = presets.get(preset_name)
             
             if preset:
-                # 计算每一手的下注金额
+                # 计算每一手的下注金额（倍投序列）
                 base_amount = int(preset[6])
                 lose_once_amt = int(base_amount * float(preset[2]))
                 lose_twice_amt = int(base_amount * float(preset[3]))
                 lose_three_amt = int(base_amount * float(preset[4]))
                 lose_four_amt = int(base_amount * float(preset[5]))
                 
-                bet_hands = (
-                    f"• 第 1 手：{_format_money_message(base_amount)}\n"
-                    f"• 第 2 手：{_format_money_message(base_amount)}\n"
-                    f"• 第 3 手（1 输）：{_format_money_message(lose_once_amt)}\n"
-                    f"• 第 4 手（2 输）：{_format_money_message(lose_twice_amt)}\n"
-                    f"• 第 5 手（3 输）：{_format_money_message(lose_three_amt)}\n"
-                    f"• 第 6 手（4 输）：{_format_money_message(lose_four_amt)}"
-                )
+                bet_amounts = [
+                    base_amount,  # 第 1 手
+                    base_amount,  # 第 2 手
+                    lose_once_amt,  # 第 3 手（1 输）
+                    lose_twice_amt,  # 第 4 手（2 输）
+                    lose_three_amt,  # 第 5 手（3 输）
+                    lose_four_amt,  # 第 6 手（4 输）
+                ]
+                
+                bet_lines = []
+                for i, amt in enumerate(bet_amounts, 1):
+                    note = ""
+                    if i == 1:
+                        note = "（首注）"
+                    elif i == 2:
+                        note = "（连赢继续）"
+                    elif i >= 3:
+                        note = f"（{i-2}输）"
+                    bet_lines.append(f"• 第{i}手：{_format_money_message(amt)} {note}")
+                
+                # 4 输后的持续金额说明
+                bet_lines.append(f"• 7 手起：{_format_money_message(lose_four_amt)}（4 输后持续）")
+                
+                bet_text = "\n".join(bet_lines)
                 
                 mes = (
                     f"<b>🔄 已切换到交替模式</b>\n\n"
@@ -7209,8 +7241,8 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                     f"• 下注方向：反向（开 1 押 0，开 0 押 1）\n"
                     f"• 当前预设：{preset_name}\n"
                     f"• 额外加注：触发长龙或交替形态时 +100 万\n\n"
-                    f"<b>📊 下注金额（每手）：</b>\n"
-                    f"{bet_hands}\n\n"
+                    f"<b>📊 倍投下注金额：</b>\n"
+                    f"{bet_text}\n\n"
                     f"使用 <code>/st [预设名]</code> 切换回跟随策略"
                 )
             else:
