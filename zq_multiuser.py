@@ -7749,7 +7749,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                     multipliers = [float(params[2]), float(params[3]), float(params[4]), float(params[5])]
                     lose_stop = int(params[1])
                     
-                    # 计算每手金额：第 1 手首注，第 2 手起按倍率递增
+                    # 计算连续倍投的每一手金额（基于前一手金额）
                     lines = [
                         f"<b>【{target_preset}】预设（最多连投 {lose_stop} 手）</b>",
                         f"  第 1 手：{_format_money_message(base)}（首注）",
@@ -7757,20 +7757,20 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                     
                     current = base
                     for i, mult in enumerate(multipliers, 2):
-                        current = int(base * mult)
-                        lines.append(f"  第{i}手：{_format_money_message(current)}（×{mult} 倍率）")
+                        current = int(current * mult)  # 基于前一手金额倍投
+                        lines.append(f"  第{i}手：{_format_money_message(current)}（×{mult} 倍）")
                     
                     # 后续手数
                     for i in range(6, lose_stop + 1):
-                        current = int(base * multipliers[-1])
-                        lines.append(f"  第{i}手：{_format_money_message(current)}（4 输后持续）")
+                        current = int(current * multipliers[-1])  # 继续倍投
+                        lines.append(f"  第{i}手：{_format_money_message(current)}（持续倍投）")
                     
                     lines.extend([
                         "",
                         "<b>💡 说明：</b>",
                         "• 第 1 手为首注金额",
-                        "• 第 2 手起按预设倍率递增（3.0→2.5→2.2→2.1）",
-                        "• 第 6 手起固定使用 2.1 倍率持续",
+                        "• 第 2 手起基于前一手金额连续倍投（×3.0→×2.5→×2.2→×2.1）",
+                        "• 每输一手按倍率递增，风险较高请谨慎使用",
                         "• 触发长龙 5 连或交替 5 位时额外加注 100 万",
                     ])
                     
@@ -7791,17 +7791,20 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                     lose_stop = int(params[1])
                     
                     lines.append(f"<b>【{name}】预设（最多连投 {lose_stop} 手）</b>")
-                    lines.append(f"  第 1 手：{_format_money_message(base)}（首注）")
+                    lines.append(f"  第 1 手：{_format_money_message(base)}")
                     
                     current = base
                     for i, mult in enumerate(multipliers, 2):
-                        current = int(base * mult)
+                        current = int(current * mult)
                         lines.append(f"  第{i}手：{_format_money_message(current)}")
                     
                     # 后续手数
-                    for i in range(6, lose_stop + 1):
-                        current = int(base * multipliers[-1])
+                    for i in range(6, min(lose_stop + 1, 9)):  # 限制显示到第 8 手
+                        current = int(current * multipliers[-1])
                         lines.append(f"  第{i}手：{_format_money_message(current)}")
+                    
+                    if lose_stop >= 9:
+                        lines.append(f"  ...（共 {lose_stop} 手）")
                     
                     lines.append("")
                 
@@ -7810,10 +7813,10 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                     + "\n".join(lines) +
                     "<b>💡 说明：</b>\n"
                     "• 第 1 手为首注金额\n"
-                    "• 第 2-5 手按预设倍率递增（3.0→2.5→2.2→2.1）\n"
-                    "• 第 6 手起固定使用 2.1 倍率持续\n"
+                    "• 第 2 手起基于前一手金额连续倍投（×3.0→×2.5→×2.2→×2.1）\n"
+                    "• 每输一手按倍率递增，风险较高请谨慎使用\n"
                     "• 触发长龙 5 连或交替 5 位时额外加注 100 万\n\n"
-                    "执行 <code>/ysz [预设名]</code> 查看指定预设"
+                    "执行 <code>/ysz [预设名]</code> 查看指定预设完整序列"
                 )
                 message = await send_to_admin(client, mes, user_ctx, global_config)
                 asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
