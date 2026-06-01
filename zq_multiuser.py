@@ -7198,7 +7198,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
             return
 
         # risk - 基础/深度风控开关
-        # st - 启动预设 - 与master一致
+        # st - 启动预设 - 与 master 一致
         if cmd == "st" and len(my) > 1:
             preset_name = my[1]
             if preset_name in presets:
@@ -7238,6 +7238,47 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                         ("策略参数", f"{preset[0]} {preset[1]} {preset[2]} {preset[3]} {preset[4]} {preset[5]} {preset[6]}"),
                         ("下注方向", direction_label),
                     ],
+                    action="使用 `/st <preset_name>` 可切换到其他预设。",
+                )
+                await send_to_admin(client, mes, user_ctx, global_config)
+                log_event(logging.INFO, 'user_cmd', 'st', user_id=user_ctx.user_id,
+                          data=f"preset={preset_name}, direction={bet_direction}")
+                return
+            
+            # 预设不存在，提示用户
+            preset_list = ", ".join(presets.keys())
+            mes = _build_ops_card(
+                "❌ 预设不存在",
+                summary=f"可用预设：{preset_list}",
+                action="使用 `/st <preset_name>` 启动预设。",
+            )
+            await send_to_admin(client, mes, user_ctx, global_config)
+            return
+        
+        # mt - 切换到交替模式（反向下注：开 1 押 0，开 0 押 1）
+        if cmd == "mt":
+            # 设置 bet_direction 为 reverse，实现反向下注
+            rt["bet_direction"] = "reverse"
+            rt["switch"] = True
+            rt["manual_pause"] = False
+            rt["bet_on"] = True
+            rt["mode_stop"] = True
+            rt["bet"] = False  # 等待真实盘口触发下注
+            user_ctx.save_state()
+            
+            mes = _build_ops_card(
+                "🔄 已切换到交替模式",
+                summary="交替模式：反向下注（开 1 押 0，开 0 押 1）",
+                fields=[
+                    ("下注方向", "反向"),
+                    ("策略说明", "上一手开 1 则下注押 0，上一手开 0 则下注押 1"),
+                ],
+                action="使用 `/st 5k` 等预设命令可切换回跟随策略。",
+            )
+            await send_to_admin(client, mes, user_ctx, global_config)
+            log_event(logging.INFO, 'user_cmd', 'mt', user_id=user_ctx.user_id,
+                      data="mode=alternation, direction=reverse")
+            return
                     action="建议留意本轮自动测算结果，并用 `status` 确认当前状态。",
                 )
                 log_event(logging.INFO, 'user_cmd', '启动预设', user_id=user_ctx.user_id, preset=preset_name)
