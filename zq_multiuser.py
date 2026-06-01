@@ -7136,6 +7136,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                     fields=[
                         ("策略参数", f"{preset[0]} {preset[1]} {preset[2]} {preset[3]} {preset[4]} {preset[5]} {preset[6]}"),
                         ("下注方向", direction_label),
+                        ("下注金额", f"{preset[6]} ({_format_money_message(int(preset[6]))})"),
                     ],
                     action="使用 `/st <preset_name>` 可切换到其他预设。",
                 )
@@ -7165,11 +7166,17 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
             rt["bet"] = False  # 等待真实盘口触发下注
             user_ctx.save_state()
             
+            # 获取当前预设的下注金额
+            preset_name = rt.get("current_preset_name", "")
+            current_amount = int(rt.get("bet_amount", rt.get("initial_amount", 500)))
+            
             mes = _build_ops_card(
                 "🔄 已切换到交替模式",
                 summary="交替模式：反向下注（开 1 押 0，开 0 押 1）",
                 fields=[
                     ("下注方向", "反向"),
+                    ("当前预设", preset_name or "未设置"),
+                    ("下注金额", f"{current_amount:,} ({_format_money_message(current_amount)})"),
                     ("策略说明", "上一手开 1 则下注押 0，上一手开 0 则下注押 1"),
                 ],
                 action="使用 `/st 5k` 等预设命令可切换回跟随策略。",
