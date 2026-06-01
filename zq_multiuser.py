@@ -4380,13 +4380,13 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
                       data=f"seq={seq}, follow={follow}, prediction={prediction}")
         # 优先级 2: 交替模式检查（仅在 bet_mode=alternation 时生效）
         elif rt.get("bet_mode", BET_MODE_FOLLOW) == BET_MODE_ALTERNATION and len(history) >= 5:
-            # 交替模式：全部跟随上一手（取消 5 位反向破局）
-            prediction = history[-1]
+            # 交替模式：反向下注（开 1 押 0，开 0 押 1）
+            prediction = 1 - history[-1]
             rt["last_predict_source"] = "alternation_mode"
             rt["last_predict_tag"] = "ALTERNATION_MODE"
             rt["last_predict_confidence"] = 80
-            rt["last_predict_reason"] = f"交替模式：跟随上一手{history[-1]}，下{'大' if prediction == 1 else '小'}"
-            log_event(logging.INFO, 'bet_on', '交替模式跟随', user_id=user_ctx.user_id,
+            rt["last_predict_reason"] = f"交替模式：反向下注，上一手{history[-1]}，下{'大' if prediction == 1 else '小'}"
+            log_event(logging.INFO, 'bet_on', '交替模式反向', user_id=user_ctx.user_id,
                       data=f"history[-1]={history[-1]}, prediction={prediction}")
         elif len(history) > 0:
             prediction = history[-1]
