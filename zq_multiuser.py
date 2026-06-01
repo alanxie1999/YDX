@@ -4901,13 +4901,15 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
 
 def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
     """
-    长龙额外加注：
+    特殊形态额外加注：
     - 5 连以上长龙：额外加 1000000
+    - 5 位纯交替破局：额外加 1000000
     直到不中后停止。
     """
     if rt.get("lose_count", 0) > 0:
         rt["dragon_extra_active"] = False
         rt["dragon_tail_streak"] = 0
+        rt["alternation_break_active"] = False
         # 不中时清除强制延续状态
         rt["forced_bet_remaining"] = 0
         rt["forced_bet_direction"] = 0
@@ -4929,7 +4931,17 @@ def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
     if streak >= 5:
         rt["dragon_extra_active"] = True
         rt["dragon_tail_streak"] = streak
+        rt["alternation_break_active"] = False
         return 1000000
+
+    # 检查交替破局（5 位纯交替）
+    if len(history) >= 5:
+        last_5 = ''.join(str(x) for x in history[-5:])
+        if last_5 in ('01010', '10101'):
+            rt["dragon_extra_active"] = True
+            rt["alternation_break_active"] = True
+            rt["dragon_tail_streak"] = 5
+            return 1000000
 
     return 0
 
@@ -7425,7 +7437,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
         # mt - 切换到交替下注模式
         if cmd == "mt":
             rt["bet_mode"] = BET_MODE_ALTERNATION
-            mode_info_text = "交替模式：反向下注（开 1 押 0，开 0 押 1）"
+            mode_info_text = "交替模式：5 位纯交替 (10101/01010) 时额外下注 100 万"
             user_ctx.save_state()
             mes = _build_ops_card(
                 "✅ 已切换到交替下注模式",
@@ -7444,7 +7456,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
         # mf - 切换到跟随下注模式
         if cmd == "mf":
             rt["bet_mode"] = BET_MODE_FOLLOW
-            mode_info_text = "跟随模式：跟随上一手（开 1 押 1，开 0 押 0）"
+            mode_info_text = "跟随模式：简单跟随上一手结果"
             user_ctx.save_state()
             mes = _build_ops_card(
                 "✅ 已切换到跟随下注模式",
