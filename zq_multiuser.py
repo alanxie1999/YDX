@@ -7136,16 +7136,28 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 for name, params in sorted(presets.items()):
                     base = int(params[6])
                     max_amt = base + 1000000
+                    # 基础金额：小额显示数字，大额显示万
+                    if base >= 10000:
+                        base_str = f"{base/10000:.1f}万"
+                    else:
+                        base_str = f"{base:,}"
+                    max_str = f"{max_amt/10000:.1f}万"
                     current_mark = " ← 当前" if name == preset_name else ""
-                    preset_lines.append(f"• <code>{name:6}</code>: {_format_money_message(base):>10} → {_format_money_message(max_amt):>12}{current_mark}")
+                    preset_lines.append(f"• <code>{name:6}</code>: {base_str:>10} → {max_str:>12}{current_mark}")
                 
                 preset_table = "\n".join(preset_lines)
+                
+                # 当前基础金额格式化
+                if int(preset[6]) >= 10000:
+                    current_base_str = f"{int(preset[6])/10000:.1f}万"
+                else:
+                    current_base_str = f"{int(preset[6]):,}"
                 
                 mes = (
                     f"<b>🎯 预设启动成功：{preset_name}</b>\n\n"
                     f"<b>当前配置：</b>\n"
                     f"• 下注方向：{direction_label}\n"
-                    f"• 基础金额：{_format_money_message(int(preset[6]))}\n"
+                    f"• 基础金额：{current_base_str}\n"
                     f"• 额外加注：触发长龙或交替形态时 +100 万\n\n"
                     f"<b>📊 所有预设下注金额：</b>\n"
                     f"{preset_table}\n\n"
@@ -7183,13 +7195,25 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
             preset_name = rt.get("current_preset_name", "")
             current_amount = int(rt.get("bet_amount", rt.get("initial_amount", 500)))
             
+            # 当前基础金额格式化
+            if current_amount >= 10000:
+                current_base_str = f"{current_amount/10000:.1f}万"
+            else:
+                current_base_str = f"{current_amount:,}"
+            
             # 构建所有预设的下注金额列表
             preset_lines = []
             for name, params in sorted(presets.items()):
                 base = int(params[6])
                 max_amt = base + 1000000
+                # 基础金额：小额显示数字，大额显示万
+                if base >= 10000:
+                    base_str = f"{base/10000:.1f}万"
+                else:
+                    base_str = f"{base:,}"
+                max_str = f"{max_amt/10000:.1f}万"
                 current_mark = " ← 当前" if name == preset_name else ""
-                preset_lines.append(f"• <code>{name:6}</code>: {_format_money_message(base):>10} → {_format_money_message(max_amt):>12}{current_mark}")
+                preset_lines.append(f"• <code>{name:6}</code>: {base_str:>10} → {max_str:>12}{current_mark}")
             
             preset_table = "\n".join(preset_lines)
             
@@ -7198,7 +7222,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 f"<b>当前配置：</b>\n"
                 f"• 下注方向：反向（开 1 押 0，开 0 押 1）\n"
                 f"• 当前预设：{preset_name or '未设置'}\n"
-                f"• 基础金额：{_format_money_message(current_amount)}\n"
+                f"• 基础金额：{current_base_str}\n"
                 f"• 额外加注：触发长龙或交替形态时 +100 万\n\n"
                 f"<b>📊 所有预设下注金额：</b>\n"
                 f"{preset_table}\n\n"
