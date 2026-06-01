@@ -240,12 +240,7 @@ except Exception:
 # 自动统计推送节奏：每 10 局一次，保留 10 分钟后自动删除
 AUTO_STATS_INTERVAL_ROUNDS = 10
 
-# 下注模式配置
-BET_MODE_FOLLOW = "follow"
-BET_MODE_ALTERNATION = "alternation"
-
-BET_MODE_FOLLOW = "follow"  # 跟随模式
-BET_MODE_ALTERNATION = "alternation"  # 交替模式
+# 自动统计删除延迟
 AUTO_STATS_DELETE_DELAY_SECONDS = 600
 
 # 风控节奏：以最近 40 笔实盘胜率为基础，结合连输深度做分层暂停。
@@ -4378,16 +4373,6 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
             rt["last_predict_reason"] = reason
             log_event(logging.INFO, 'bet_on', '固定规律', user_id=user_ctx.user_id,
                       data=f"seq={seq}, follow={follow}, prediction={prediction}")
-        # 优先级 2: 交替模式检查（仅在 bet_mode=alternation 时生效）
-        elif rt.get("bet_mode", BET_MODE_FOLLOW) == BET_MODE_ALTERNATION and len(history) >= 5:
-            # 交替模式：反向下注（开 1 押 0，开 0 押 1）
-            prediction = 1 - history[-1]
-            rt["last_predict_source"] = "alternation_mode"
-            rt["last_predict_tag"] = "ALTERNATION_MODE"
-            rt["last_predict_confidence"] = 80
-            rt["last_predict_reason"] = f"交替模式：反向下注，上一手{history[-1]}，下{'大' if prediction == 1 else '小'}"
-            log_event(logging.INFO, 'bet_on', '交替模式反向', user_id=user_ctx.user_id,
-                      data=f"history[-1]={history[-1]}, prediction={prediction}")
         elif len(history) > 0:
             prediction = history[-1]
             rt["last_predict_source"] = "follow_last"
@@ -4901,15 +4886,13 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
 
 def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
     """
-    特殊形态额外加注：
+    长龙额外加注：
     - 5 连以上长龙：额外加 1000000
-    - 5 位纯交替破局：额外加 1000000
     直到不中后停止。
     """
     if rt.get("lose_count", 0) > 0:
         rt["dragon_extra_active"] = False
         rt["dragon_tail_streak"] = 0
-        rt["alternation_break_active"] = False
         # 不中时清除强制延续状态
         rt["forced_bet_remaining"] = 0
         rt["forced_bet_direction"] = 0
@@ -4931,17 +4914,7 @@ def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
     if streak >= 5:
         rt["dragon_extra_active"] = True
         rt["dragon_tail_streak"] = streak
-        rt["alternation_break_active"] = False
         return 1000000
-
-    # 检查交替破局（5 位纯交替）
-    if len(history) >= 5:
-        last_5 = ''.join(str(x) for x in history[-5:])
-        if last_5 in ('01010', '10101'):
-            rt["dragon_extra_active"] = True
-            rt["alternation_break_active"] = True
-            rt["dragon_tail_streak"] = 5
-            return 1000000
 
     return 0
 
@@ -7434,45 +7407,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                     )
                 return
         
-        # mt - 切换到交替下注模式
-        if cmd == "mt":
-            rt["bet_mode"] = BET_MODE_ALTERNATION
-            mode_info_text = "交替模式：5 位纯交替 (10101/01010) 时额外下注 100 万"
-            user_ctx.save_state()
-            mes = _build_ops_card(
-                "✅ 已切换到交替下注模式",
-                fields=[
-                    ("当前模式", mode_info_text),
-                ],
-                action="使用 `/mf` 可切回跟随模式。",
-            )
-            log_event(logging.INFO, 'user_cmd', '切换到交替下注模式', user_id=user_ctx.user_id)
-            message = await send_to_admin(client, mes, user_ctx, global_config)
-            asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
-            if message:
-                asyncio.create_task(delete_later(client, message.chat_id, message.id, 30))
-            return
-        
-        # mf - 切换到跟随下注模式
-        if cmd == "mf":
-            rt["bet_mode"] = BET_MODE_FOLLOW
-            mode_info_text = "跟随模式：简单跟随上一手结果"
-            user_ctx.save_state()
-            mes = _build_ops_card(
-                "✅ 已切换到跟随下注模式",
-                fields=[
-                    ("当前模式", mode_info_text),
-                ],
-                action="使用 `/mt` 可切换到交替模式。",
-            )
-            log_event(logging.INFO, 'user_cmd', '切换到跟随下注模式', user_id=user_ctx.user_id)
-            message = await send_to_admin(client, mes, user_ctx, global_config)
-            asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
-            if message:
-                asyncio.create_task(delete_later(client, message.chat_id, message.id, 30))
-            return
-            await send_to_admin(
-                client,
+        # 暂停/恢复等命令...
                 _build_ops_card(
                     "❌ 目标金额设置失败",
                     summary="当前参数数量不正确。",
