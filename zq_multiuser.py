@@ -7749,23 +7749,39 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                     multipliers = [float(params[2]), float(params[3]), float(params[4]), float(params[5])]
                     lose_stop = int(params[1])
                     
-                    # 计算连续倍投的每一手金额（基于前一手金额）
+                    # 计算连续倍投的每一手金额和累计所需资金
                     lines = [
                         f"<b>【{target_preset}】预设（最多连投 {lose_stop} 手）</b>",
-                        f"  第 1 手：{_format_money_message(base)}（首注）",
                     ]
                     
                     current = base
-                    for i, mult in enumerate(multipliers, 2):
-                        current = int(current * mult)  # 基于前一手金额倍投
-                        lines.append(f"  第{i}手：{_format_money_message(current)}（×{mult} 倍）")
+                    total_needed = 0
+                    for i in range(1, lose_stop + 1):
+                        if i == 1:
+                            # 第 1 手：首注
+                            current = base
+                            mult_text = "（首注）"
+                        elif i <= 5:
+                            # 第 2-5 手：按预设倍率
+                            mult = multipliers[i-2]
+                            current = int(current * mult)
+                            mult_text = f"（×{mult} 倍）"
+                        else:
+                            # 第 6 手起：继续使用 2.1 倍率
+                            current = int(current * multipliers[-1])
+                            mult_text = "（持续倍投）"
+                        
+                        total_needed += current
+                        
+                        if i <= 6 or i == lose_stop:
+                            lines.append(f"  第{i:2d}手：下注 {_format_money_message(current):>10} | 累计需 {_format_money_message(total_needed):>12} {mult_text}")
+                        elif i == 7:
+                            lines.append(f"  ...（中间省略 {lose_stop - 12} 手）")
                     
-                    # 后续手数
-                    for i in range(6, lose_stop + 1):
-                        current = int(current * multipliers[-1])  # 继续倍投
-                        lines.append(f"  第{i}手：{_format_money_message(current)}（持续倍投）")
-                    
+                    # 最后汇总
                     lines.extend([
+                        "",
+                        f"<b>💰 总需资金：{_format_money_message(total_needed)}</b>",
                         "",
                         "<b>💡 说明：</b>",
                         "• 第 1 手为首注金额",
@@ -7782,7 +7798,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                     asyncio.create_task(delete_later(client, message.chat_id, message.id, 120))
                 log_event(logging.INFO, 'user_cmd', 'ysz', user_id=user_ctx.user_id, preset=target_preset)
             else:
-                # 查看所有预设
+                # 查看所有预设（简略版）
                 lines = []
                 for name in sorted(presets.keys()):
                     params = presets[name]
@@ -7790,33 +7806,27 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                     multipliers = [float(params[2]), float(params[3]), float(params[4]), float(params[5])]
                     lose_stop = int(params[1])
                     
-                    lines.append(f"<b>【{name}】预设（最多连投 {lose_stop} 手）</b>")
-                    lines.append(f"  第 1 手：{_format_money_message(base)}")
-                    
+                    # 计算前 5 手和总额
                     current = base
-                    for i, mult in enumerate(multipliers, 2):
-                        current = int(current * mult)
-                        lines.append(f"  第{i}手：{_format_money_message(current)}")
+                    total = 0
+                    hand_amounts = []
+                    for i in range(1, min(6, lose_stop + 1)):
+                        if i == 1:
+                            current = base
+                        else:
+                            current = int(current * multipliers[min(i-2, 3)])
+                        total += current
+                        hand_amounts.append(_format_money_message(current))
                     
-                    # 后续手数
-                    for i in range(6, min(lose_stop + 1, 9)):  # 限制显示到第 8 手
-                        current = int(current * multipliers[-1])
-                        lines.append(f"  第{i}手：{_format_money_message(current)}")
-                    
-                    if lose_stop >= 9:
-                        lines.append(f"  ...（共 {lose_stop} 手）")
-                    
-                    lines.append("")
+                    lines.append(f"<b>【{name}】</b> {hand_amounts[0]} → {hand_amounts[1]} → {hand_amounts[2]} → {hand_amounts[3]} → {hand_amounts[4]} | 总需：{_format_money_message(total)}")
                 
                 mes = (
                     "<b>📊 所有预设倍投下注金额一览</b>\n\n"
                     + "\n".join(lines) +
-                    "<b>💡 说明：</b>\n"
-                    "• 第 1 手为首注金额\n"
-                    "• 第 2 手起基于前一手金额连续倍投（×3.0→×2.5→×2.2→×2.1）\n"
-                    "• 每输一手按倍率递增，风险较高请谨慎使用\n"
-                    "• 触发长龙 5 连或交替 5 位时额外加注 100 万\n\n"
-                    "执行 <code>/ysz [预设名]</code> 查看指定预设完整序列"
+                    "\n\n<b>💡 说明：</b>\n"
+                    "• 显示前 5 手下注金额和总需资金\n"
+                    "• 第 2 手起基于前一手金额连续倍投\n"
+                    "• 执行 <code>/ysz [预设名]</code> 查看指定预设完整序列和每一手累计资金"
                 )
                 message = await send_to_admin(client, mes, user_ctx, global_config)
                 asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
