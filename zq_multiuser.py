@@ -299,8 +299,6 @@ FIXED_PATTERNS = {
     "000000": {"follow": "0", "label": "小龙延续"},
     "010101": {"follow": "reverse", "label": "6 位交替"},
     "101010": {"follow": "reverse", "label": "6 位交替"},
-    "01010": {"follow": "reverse", "label": "5 位交替"},
-    "10101": {"follow": "reverse", "label": "5 位交替"},
 }
 
 # 同手位防卡死：避免 SKIP/超时导致长期不落单
