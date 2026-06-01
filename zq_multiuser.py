@@ -244,63 +244,6 @@ AUTO_STATS_INTERVAL_ROUNDS = 10
 BET_MODE_FOLLOW = "follow"
 BET_MODE_ALTERNATION = "alternation"
 
-def _detect_disk_pattern(history: list, window: int = 10) -> str:
-    """
-    检测盘面特征，用于智能模式轮换
-    返回：'alternating' (交替), 'trending' (趋势), 'mixed' (混合)
-    """
-    if not isinstance(history, list) or len(history) < window:
-        return 'mixed'
-    
-    # 计算交替频率
-    alt_count = sum(1 for i in range(len(history)-window, len(history)-1) 
-                    if history[i] != history[i+1])
-    alt_rate = alt_count / (window - 1)
-    
-    # 检测尾部连庄
-    streak = 1
-    if len(history) >= 2:
-        tail = history[-1]
-        for i in range(len(history)-2, max(len(history)-window-1, -1), -1):
-            if history[i] != tail:
-                break
-            streak += 1
-    
-    if alt_rate >= 0.8:  # 80% 以上是交替
-        return 'alternating'
-    elif streak >= 4:  # 有 4 连以上
-        return 'trending'
-    else:
-        return 'mixed'
-
-
-def _should_smart_switch_mode(current_mode: str, history: list) -> tuple:
-    """
-    智能判断是否应该切换模式
-    返回：(should_switch, reason, new_mode)
-    """
-    if not isinstance(history, list) or len(history) < 10:
-        return False, '', current_mode
-    
-    pattern = _detect_disk_pattern(history)
-    
-    if current_mode == BET_MODE_FOLLOW:
-        # 跟随模式在持续交替时表现差，切换到交替模式
-        if pattern == 'alternating':
-            return True, f"盘面持续交替 ({pattern})，切交替模式", BET_MODE_ALTERNATION
-    
-    elif current_mode == BET_MODE_ALTERNATION:
-        # 交替模式在持续交替时表现差，改跟随
-        if pattern == 'alternating':
-            alt_count = sum(1 for i in range(len(history)-1, 0, -1) 
-                           if history[i] != history[i-1])
-        elif pattern == 'trending':
-            return True, f"长龙/趋势，跟随更优", BET_MODE_FOLLOW
-    
-    return False, '', current_mode
-
-
-
 BET_MODE_FOLLOW = "follow"  # 跟随模式
 BET_MODE_ALTERNATION = "alternation"  # 交替模式
 AUTO_STATS_DELETE_DELAY_SECONDS = 600
@@ -6524,23 +6467,6 @@ async def _process_settle_slim(client, event, user_ctx: UserContext, global_conf
             rt["win_count"] = rt.get("win_count", 0) + 1 if win else 0
             rt["lose_count"] = rt.get("lose_count", 0) + 1 if not win else 0
             rt["status"] = 1 if win else 0
-            
-            # 智能模式轮换检测
-            should_switch, switch_reason, new_mode = _should_smart_switch_mode(
-                rt.get("bet_mode", BET_MODE_FOLLOW),
-                rt.get("_current_history", []) + rt.get("_history_cache", [])
-            )
-            
-            if should_switch:
-                old_mode = rt.get("bet_mode", BET_MODE_FOLLOW)
-                rt["bet_mode"] = new_mode
-                log_event(
-                    logging.INFO,
-                    'settle',
-                    '智能模式轮换',
-                    user_id=user_ctx.user_id,
-                    data=f"old={old_mode}, new={new_mode}, reason={switch_reason}"
-                )
 
             settled_entry["result"] = result_text
             settled_entry["profit"] = profit
