@@ -291,8 +291,6 @@ HIGH_STEP_DOUBLE_CONFIRM_MODEL_TIMEOUT_SEC = 5.0
 # 纯交替增强（旧版 AI 模型逻辑，已废弃）：当最近盘口“由近到远”出现 6 位纯交替时，
 # 注：当前简单跟随策略使用 5 位检测（10101/01010），在第 5 注后反向打破
 # 主脚本强制按最新一手同向下注，尝试结束交替。
-ALTERNATION_BREAK_TRIGGER_WINDOW = 6
-ALTERNATION_BREAK_PATTERNS = {"010101", "101010"}
 
 # 固定数据规律：检测到特定序列后，按照规律下注
 FIXED_PATTERNS = {
@@ -2884,39 +2882,6 @@ def analyze_rhythm_context(history, recent_window: int = 9, lookback_events: int
     }
 
 
-def _detect_alternation_break_signal(
-    history: list,
-    window: int = ALTERNATION_BREAK_TRIGGER_WINDOW,
-    order: str = "near_to_far",
-) -> Dict[str, Any]:
-    """识别盘口“由近到远”纯交替信号，并给出结束交替的同向下注方向。"""
-    if not isinstance(history, list) or len(history) < int(window):
-        return {"active": False}
-
-    normalized_order = str(order or "near_to_far").strip().lower()
-    if normalized_order == "chronological":
-        near_to_far = [int(x) for x in history[-int(window):][::-1]]
-    else:
-        near_to_far = [int(x) for x in history[:int(window)]]
-    seq = "".join(str(x) for x in near_to_far)
-    if seq not in ALTERNATION_BREAK_PATTERNS:
-        return {"active": False}
-
-    latest_value = int(near_to_far[0])
-    return {
-        "active": True,
-        "near_to_far_seq": seq,
-        "window": int(window),
-        "latest_value": latest_value,
-        "prediction": latest_value,
-    }
-
-
-def _clear_alternation_break_runtime(rt: dict) -> None:
-    rt["alternation_break_active"] = False
-    rt["alternation_break_seq"] = ""
-    rt["alternation_break_side"] = ""
-
 
 def _detect_fixed_pattern_signal(
     history: list,
@@ -3014,39 +2979,6 @@ def _clear_fixed_pattern_runtime(rt: dict) -> None:
     rt["fixed_pattern_label"] = ""
 
 
-def _apply_alternation_break_override(
-    rt: dict,
-    history: list,
-    prediction: int,
-    *,
-    order: str = "near_to_far",
-) -> int:
-    """在纯交替盘面里，用“最新一手同向”增强主脚本，而不是替换整套模型。"""
-    signal = _detect_alternation_break_signal(history, order=order)
-    if not signal.get("active", False):
-        _clear_alternation_break_runtime(rt)
-        return int(prediction)
-
-    forced_prediction = int(signal.get("prediction", prediction))
-    side_text = "大" if forced_prediction == 1 else "小"
-    window = int(signal.get("window", ALTERNATION_BREAK_TRIGGER_WINDOW))
-    rt["alternation_break_active"] = True
-    rt["alternation_break_seq"] = str(signal.get("near_to_far_seq", ""))
-    rt["alternation_break_side"] = side_text
-    rt["last_predict_source"] = "alternation_break"
-    rt["last_predict_tag"] = "ALTERNATION_BREAK"
-    rt["last_predict_confidence"] = 100
-    rt["last_predict_reason"] = f"{window}位纯交替，按结束交替规则押同向"
-    rt["last_predict_info"] = _build_predict_basis_text(
-        history=history,
-        prediction=forced_prediction,
-        source="alternation_break",
-        pattern_tag="ALTERNATION_BREAK",
-        rhythm_tag="ALTERNATION_RHYTHM",
-        tail_streak_len=window,
-        tail_streak_char=forced_prediction,
-    )
-    return forced_prediction
 
 
 def fallback_prediction(history):
