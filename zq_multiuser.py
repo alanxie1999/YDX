@@ -1359,7 +1359,29 @@ async def _notify_ai_key_warning_if_needed(client, user_ctx: UserContext, global
 
 
 def get_software_version_text() -> str:
-    """返回软件版本展示：tag(hash)。"""
+    """返回软件版本展示：优先使用文件版本号，其次 tag(hash)。"""
+    # 优先读取文件中的版本号
+    try:
+        import re
+        with open(__file__, 'r', encoding='utf-8') as f:
+            content = f.read(500)  # 只读前 500 字节
+            match = re.search(r'^版本：(\d+\.\d+\.\d+)', content, re.MULTILINE)
+            if match:
+                version = match.group(1)
+                # 尝试获取 git 信息作为补充
+                try:
+                    info = get_current_repo_info()
+                    short_commit = info.get("short_commit", "")
+                    tag = info.get("current_tag", "") or info.get("nearest_tag", "")
+                    if tag and tag != version:
+                        return f"{version} ({tag})"
+                    return version
+                except Exception:
+                    return version
+    except Exception:
+        pass
+    
+    # 回退到 git 信息
     try:
         info = get_current_repo_info()
         short_commit = info.get("short_commit", "") or "unknown"
