@@ -7152,6 +7152,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 rt["initial_amount"] = int(preset[6])
                 rt["current_preset_name"] = preset_name
                 rt["bet_amount"] = int(preset[6])
+                rt["initial_amount"] = int(preset[6])
                 # 读取方向参数（第 8 个参数，可选）
                 bet_direction = preset[7] if len(preset) > 7 else "auto"
                 rt["bet_direction"] = bet_direction
@@ -7168,6 +7169,11 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 rt["fund_pause_notified"] = False
                 rt["limit_stop_notified"] = False
                 _clear_lose_recovery_tracking(rt)
+                # 重置输赢计数，确保第一次下注使用初始金额
+                rt["lose_count"] = 0
+                rt["win_count"] = 0
+                # 强制设置 bet_amount 为初始金额，确保按照预设金额进行第一次下注
+                rt["bet_amount"] = int(preset[6])
                 user_ctx.save_state()
                 
                 direction_label = {"same": "同向", "reverse": "反向", "auto": "跟随策略"}.get(bet_direction, bet_direction)
@@ -7204,6 +7210,12 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
             rt["bet_on"] = True
             rt["mode_stop"] = True
             rt["bet"] = False  # 等待真实盘口触发下注
+            # 重置输赢计数，确保第一次下注使用初始金额
+            rt["lose_count"] = 0
+            rt["win_count"] = 0
+            # 强制设置 bet_amount 为初始金额，确保按照预设金额进行第一次下注
+            initial_amount = int(rt.get("initial_amount", 500))
+            rt["bet_amount"] = initial_amount
             user_ctx.save_state()
             
             preset_name = rt.get("current_preset_name", "")
