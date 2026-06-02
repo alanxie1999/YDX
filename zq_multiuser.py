@@ -4810,31 +4810,30 @@ def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
     特殊形态额外加注：
     - 5 连以上长龙：额外加 1000000
     - 6 位纯交替：额外加 1000000
-    直到不中后停止。
     
-    注意：所有模式下不中后均不再触发额外加注。
+    触发条件：
+    - 第 1 手（lose_count=0）：不加注，严格按 preset 金额
+    - 第 2 手起（lose_count>0）：检测到形态时加注
     """
-    # 不中后重置额外加注（所有模式统一行为）
-    if rt.get("lose_count", 0) > 0:
+    # 第 1 手不加注，严格按 preset 金额
+    if rt.get("lose_count", 0) == 0:
         rt["dragon_extra_active"] = False
         rt["dragon_tail_streak"] = 0
-        # 不中时清除强制延续状态
-        rt["forced_bet_remaining"] = 0
-        rt["forced_bet_direction"] = 0
         return 0
-
+    
+    # 第 2 手起：检测到形态才加注
     if history is None:
         history = rt.get("_current_history", [])
         if not history:
             history = rt.get("_history_cache", [])
     else:
         rt["_history_cache"] = history
-
+    
     if not isinstance(history, list) or len(history) < 5:
         rt["dragon_extra_active"] = False
         return 0
-
-    # 检查长龙
+    
+    # 检查长龙（5 连以上）
     streak, tail_side = _get_history_tail_streak(history)
     if streak >= 5:
         rt["dragon_extra_active"] = True
@@ -4842,7 +4841,7 @@ def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
         log_event(logging.INFO, 'bet_on', '长龙额外加注', user_id=0,
                   data=f"streak={streak}, side={tail_side}, history={''.join(str(x) for x in history[-10:])}")
         return 1000000
-
+    
     # 检查交替（6 位纯交替）
     if len(history) >= 6:
         last_6 = ''.join(str(x) for x in history[-6:])
@@ -4852,9 +4851,10 @@ def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
             log_event(logging.INFO, 'bet_on', '交替额外加注', user_id=0,
                       data=f"seq={last_6}, history={''.join(str(x) for x in history[-10:])}")
             return 1000000
-
+    
     # 非特殊形态：清除额外加注状态
     rt["dragon_extra_active"] = False
+    return 0
     return 0
 
 
