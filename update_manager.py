@@ -905,7 +905,7 @@ def _rollback_to_last_release_unlocked(root: Path) -> Dict[str, Any]:
     if not commit:
         return {"success": False, "error": "未找到可回滚版本，请先执行一次 upnow"}
 
-    checkout_res = _run_cmd(["git", "checkout", commit], root, timeout=60)
+        checkout_res = _run_cmd(["git", "checkout", "-f", commit], root, timeout=60)
     if checkout_res.returncode != 0:
         return {
             "success": False,
@@ -1052,7 +1052,7 @@ def update_to_release(repo_root: Optional[str] = None, target_tag: Optional[str]
 
         _save_rollback_point(root, current, final_tag)
 
-        checkout_res = _run_cmd(["git", "checkout", final_tag], root, timeout=60)
+        checkout_res = _run_cmd(["git", "checkout", "-f", final_tag], root, timeout=60)
         if checkout_res.returncode != 0:
             return {
                 "success": False,
@@ -1182,7 +1182,7 @@ def update_to_ref(repo_root: Optional[str] = None, target_ref: Optional[str] = N
 
         _save_rollback_point(root, current, final_ref)
 
-        checkout_res = _run_cmd(["git", "checkout", final_ref], root, timeout=60)
+        checkout_res = _run_cmd(["git", "checkout", "-f", final_ref], root, timeout=60)
         if checkout_res.returncode != 0:
             return {
                 "success": False,
