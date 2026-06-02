@@ -7784,52 +7784,47 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                     lose_stop = int(params[1])
                     
                     # 计算连续倍投的每一手金额和累计所需资金
-                    lines = [
-                        f"<b>📊 【{target_preset}】预设详情</b>",
-                        f"最多连投 <code>{lose_stop}</code> 手",
-                        "",
-                        f"<b>💵 倍投计划</b>",
-                    ]
-                    
+                    hand_lines = []
                     current = base
                     total_needed = 0
                     for i in range(1, lose_stop + 1):
                         if i == 1:
-                            # 第 1 手：首注
                             current = base
-                            mult_text = "<i>首注</i>"
+                            label = "首注"
                         elif i <= 5:
-                            # 第 2-5 手：按预设倍率
                             mult = multipliers[i-2]
                             current = int(current * mult)
-                            mult_text = f"<i>×{mult} 倍</i>"
+                            label = f"×{mult} 倍"
                         else:
-                            # 第 6 手起：继续使用 2.1 倍率
                             current = int(current * multipliers[-1])
-                            mult_text = "<i>持续倍投</i>"
+                            label = "持续倍投"
                         
                         total_needed += current
+                        hand_lines.append(f"├ 第{i:2d}手：<code>{_format_money_message(current):>10}</code>（累计：<code>{_format_money_message(total_needed):>10}</code>）<i>{label}</i>")
+                    
+                    # 替换最后一行的 ├ 为 └
+                    if hand_lines:
+                        hand_lines[-1] = hand_lines[-1].replace("├", "└", 1)
+                    
+                    # 使用统计概览风格
+                    mes = (
+                        f"<b>【 {target_preset} 预设详情 】</b>\n"
+                        f"<b>最多连投：</b><code>{lose_stop:2d}</code> 手\n\n"
                         
-                        # 美化格式：使用 emoji 和统计概览风格的对齐格式
-                        hand_icon = "🎯" if i == 1 else ("⚠️" if i <= 5 else "🔥")
-                        lines.append(f"{hand_icon} 第{i:2d}手：下注 <code>{_format_money_message(current):>10}</code> | 累计需 <code>{_format_money_message(total_needed):>10}</code> {mult_text}")
-                    
-                    # 最后汇总
-                    lines.extend([
-                        "",
-                        f"<b>💰 总需资金：<code>{_format_money_message(total_needed)}</code></b>",
-                        "",
-                        f"<b>⚙️ 策略参数</b>",
-                        f"<b>初始金额：</b> <code>{_format_money_message(base)}</code>",
-                        f"<b>倍投系数：</b> <code>{multipliers[0]}</code> / <code>{multipliers[1]}</code> / <code>{multipliers[2]}</code> / <code>{multipliers[3]}</code>",
-                        "",
-                        f"<b>💡 说明</b>",
-                        f"• <b>倍投规则：</b>第 1 手为首注，第 2 手起基于前一手金额连续倍投",
-                        f"• <b>风险提示：</b>每输一手按倍率递增，{lose_stop}手总风险为总需资金",
-                        f"• <b>额外加注：</b>触发长龙 5 连或交替 6 位时额外加注 100 万",
-                    ])
-                    
-                    mes = "\n".join(lines)
+                        f"<b>💵 倍投计划</b>\n"
+                        + "\n".join(hand_lines) +
+                        f"\n\n<b>💰 总需资金：</b><code>{_format_money_message(total_needed)}</code>\n\n"
+                        
+                        f"<b>⚙️ 策略参数</b>\n"
+                        f"├ <b>初始金额：</b><code>{_format_money_message(base)}</code>\n"
+                        f"├ <b>倍投系数：</b><code>{multipliers[0]}</code> / <code>{multipliers[1]}</code> / <code>{multipliers[2]}</code> / <code>{multipliers[3]}</code>\n"
+                        f"└ <b>额外加注：</b>长龙 5 连或交替 6 位时 +100 万\n\n"
+                        
+                        f"<b>💡 说明</b>\n"
+                        f"• 第 1 手为首注，第 2 手起基于前一手金额连续倍投\n"
+                        f"• 每输一手按倍率递增，总风险为总需资金\n"
+                        f"• 触发额外加注时独立计算，不包含在总需资金内"
+                    )
                 
                 message = await send_to_admin(client, mes, user_ctx, global_config)
                 asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
@@ -7838,7 +7833,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 log_event(logging.INFO, 'user_cmd', 'ysz', user_id=user_ctx.user_id, preset=target_preset)
             else:
                 # 查看所有预设（简略版）
-                lines = []
+                preset_lines = []
                 for name in sorted(presets.keys()):
                     params = presets[name]
                     base = int(params[6])
@@ -7857,17 +7852,25 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                         total += current
                         hand_amounts.append(_format_money_message(current))
                     
-                    lines.append(f"<b>【{name}】</b> <code>{hand_amounts[0]}</code> → <code>{hand_amounts[1]}</code> → <code>{hand_amounts[2]}</code> → <code>{hand_amounts[3]}</code> → <code>{hand_amounts[4]}</code> | 总需 <code>{_format_money_message(total)}</code>")
+                    preset_lines.append(f"├ <b>【{name}】</b> <code>{hand_amounts[0]}</code> → <code>{hand_amounts[1]}</code> → <code>{hand_amounts[2]}</code> → <code>{hand_amounts[3]}</code> → <code>{hand_amounts[4]}</code>（总需：<code>{_format_money_message(total)}</code>）")
+                
+                if preset_lines:
+                    preset_lines[-1] = preset_lines[-1].replace("├", "└", 1)
+                
+                # 统一倍投系数显示（以第一个预设为准）
+                first_params = presets[sorted(presets.keys())[0]]
+                multipliers = [float(first_params[2]), float(first_params[3]), float(first_params[4]), float(first_params[5])]
                 
                 mes = (
-                    f"<b>📊 所有预设倍投下注金额一览</b>\n\n"
-                    + "\n".join(lines) +
-                    f"\n\n<b>⚙️ 策略参数</b>\n"
-                    f"倍投系数：<code>{multipliers[0]}</code> / <code>{multipliers[1]}</code> / <code>{multipliers[2]}</code> / <code>{multipliers[3]}</code>\n\n"
+                    f"<b>【 所有预设倍投一览 】</b>\n\n"
+                    f"<b>💵 预设列表</b>\n"
+                    + "\n".join(preset_lines) +
+                    f"\n\n<b>⚙️ 倍投系数</b>\n"
+                    f"└ <code>{multipliers[0]}</code> / <code>{multipliers[1]}</code> / <code>{multipliers[2]}</code> / <code>{multipliers[3]}</code>\n\n"
                     f"<b>💡 说明</b>\n"
                     f"• 显示前 5 手下注金额和总需资金\n"
                     f"• 第 2 手起基于前一手金额连续倍投\n"
-                    f"• 执行 <code>/ysz [预设名]</code> 查看指定预设完整序列和每一手累计资金"
+                    f"• 执行 <code>/ysz [预设名]</code> 查看完整序列"
                 )
                 message = await send_to_admin(client, mes, user_ctx, global_config)
                 asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
