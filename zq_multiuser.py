@@ -7773,9 +7773,9 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 if target_preset not in presets:
                     preset_list = ", ".join(sorted(presets.keys()))
                     mes = (
-                        f"<b>❌ 预设不存在：{target_preset}</b>\n\n"
-                        f"• 可用预设：<code>{preset_list}</code>\n\n"
-                        f"执行 <code>/ysz</code> 查看所有预设，或 <code>/ysz [预设名]</code> 查看指定预设"
+                        f"❌ 预设不存在：{target_preset}\n\n"
+                        f"• 可用预设：{preset_list}\n\n"
+                        f"执行 /ysz 查看所有预设，或 /ysz [预设名] 查看指定预设"
                     )
                 else:
                     params = presets[target_preset]
@@ -7785,7 +7785,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                     
                     # 计算连续倍投的每一手金额和累计所需资金
                     lines = [
-                        f"<b>📊【{target_preset}】预设（最多连投 {lose_stop} 手）</b>",
+                        f"📊【{target_preset}】预设（最多连投 {lose_stop} 手）",
                         "",
                     ]
                     
@@ -7795,32 +7795,32 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                         if i == 1:
                             # 第 1 手：首注
                             current = base
-                            mult_text = "<i>首注</i>"
+                            mult_text = "首注"
                         elif i <= 5:
                             # 第 2-5 手：按预设倍率
                             mult = multipliers[i-2]
                             current = int(current * mult)
-                            mult_text = f"<i>×{mult} 倍</i>"
+                            mult_text = f"×{mult} 倍"
                         else:
                             # 第 6 手起：继续使用 2.1 倍率
                             current = int(current * multipliers[-1])
-                            mult_text = "<i>持续倍投</i>"
+                            mult_text = "持续倍投"
                         
                         total_needed += current
                         
                         # 美化格式：使用 emoji 和对齐
                         hand_icon = "🎯" if i == 1 else ("⚠️" if i <= 5 else "🔥")
-                        lines.append(f"{hand_icon} 第{i}手：<b>{_format_money_message(current):>12}</b> | 累计：<b>{_format_money_message(total_needed):>12}</b> {mult_text}")
+                        lines.append(f"{hand_icon} 第{i}手：{_format_money_message(current):>12} | 累计：{_format_money_message(total_needed):>12} {mult_text}")
                     
                     # 最后汇总
                     lines.extend([
                         "",
-                        f"<b>💰 总需资金：{_format_money_message(total_needed)}</b>",
+                        f"💰 总需资金：{_format_money_message(total_needed)}",
                         "",
-                        f"<b>💡 说明：</b>",
-                        f"• <b>倍投规则：</b>第 1 手为首注，第 2 手起基于前一手金额连续倍投（×3.0→×2.5→×2.2→×2.1）",
-                        f"• <b>风险提示：</b>每输一手按倍率递增，风险较高请谨慎使用",
-                        f"• <b>额外加注：</b>触发长龙 5 连或交替 6 位时额外加注 100 万",
+                        "💡 说明：",
+                        "• 倍投规则：第 1 手为首注，第 2 手起基于前一手金额连续倍投（×3.0→×2.5→×2.2→×2.1）",
+                        "• 风险提示：每输一手按倍率递增，风险较高请谨慎使用",
+                        "• 额外加注：触发长龙 5 连或交替 6 位时额外加注 100 万",
                     ])
                     
                     mes = "\n".join(lines)
@@ -7851,15 +7851,15 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                         total += current
                         hand_amounts.append(_format_money_message(current))
                     
-                    lines.append(f"<b>【{name}】</b> {hand_amounts[0]} → {hand_amounts[1]} → {hand_amounts[2]} → {hand_amounts[3]} → {hand_amounts[4]} | 总需：{_format_money_message(total)}")
+                    lines.append(f"【{name}】{hand_amounts[0]} → {hand_amounts[1]} → {hand_amounts[2]} → {hand_amounts[3]} → {hand_amounts[4]} | 总需：{_format_money_message(total)}")
                 
                 mes = (
-                    "<b>📊 所有预设倍投下注金额一览</b>\n\n"
+                    "📊 所有预设倍投下注金额一览\n\n"
                     + "\n".join(lines) +
-                    "\n\n<b>💡 说明：</b>\n"
+                    "\n\n💡 说明：\n"
                     "• 显示前 5 手下注金额和总需资金\n"
                     "• 第 2 手起基于前一手金额连续倍投\n"
-                    "• 执行 <code>/ysz [预设名]</code> 查看指定预设完整序列和每一手累计资金"
+                    "• 执行 /ysz [预设名] 查看指定预设完整序列和每一手累计资金"
                 )
                 message = await send_to_admin(client, mes, user_ctx, global_config)
                 asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
