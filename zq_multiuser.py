@@ -4789,7 +4789,8 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
     if is_fixed_bet:
         return constants.closest_multiple_of_500(initial_amount) + dragon_extra
 
-    base_amount = int(rt.get("bet_amount", initial_amount))
+    # 计算基础倍投金额（不包含额外加注）
+    base_amount = int(rt.get("initial_amount", initial_amount))
     if lose_count == 1:
         target = base_amount * lose_once
     elif lose_count == 2:
