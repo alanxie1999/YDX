@@ -7172,12 +7172,13 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 
                 direction_label = {"same": "同向", "reverse": "反向", "auto": "跟随策略"}.get(bet_direction, bet_direction)
                 
+                # 纯文本版本
                 mes = (
-                    f"<b>🎯 预设启动成功：{preset_name}</b>\n\n"
+                    f"🎯 预设启动成功：{preset_name}\n\n"
                     f"• 下注方向：{direction_label}\n"
                     f"• 策略参数：{preset[0]} {preset[1]} {preset[2]} {preset[3]} {preset[4]} {preset[5]} {preset[6]}\n"
                     f"• 额外加注：触发长龙或交替形态时 +100 万\n\n"
-                    f"执行 <code>/ysz</code> 查看所有预设的完整倍投序列"
+                    f"执行 /ysz 查看所有预设的完整倍投序列"
                 )
                 await send_to_admin(client, mes, user_ctx, global_config)
                 log_event(logging.INFO, 'user_cmd', 'st', user_id=user_ctx.user_id,
@@ -7186,10 +7187,10 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
             
             # 预设不存在，提示用户
             preset_list = ", ".join(presets.keys())
-            mes = _build_ops_card(
-                "❌ 预设不存在",
-                summary=f"可用预设：{preset_list}",
-                action="使用 `/st <preset_name>` 启动预设。",
+            mes = (
+                f"❌ 预设不存在\n\n"
+                f"• 可用预设：{preset_list}\n\n"
+                f"使用 /st <preset_name> 启动预设"
             )
             await send_to_admin(client, mes, user_ctx, global_config)
             return
@@ -7207,12 +7208,13 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
             
             preset_name = rt.get("current_preset_name", "")
             
+            # 纯文本版本
             mes = (
-                f"<b>🔄 已切换到交替模式</b>\n\n"
+                f"🔄 已切换到交替模式\n\n"
                 f"• 下注方向：反向（开 1 押 0，开 0 押 1）\n"
                 f"• 当前预设：{preset_name or '未设置'}\n"
                 f"• 额外加注：触发长龙或交替形态时 +100 万\n\n"
-                f"执行 <code>/ysz</code> 查看所有预设的完整倍投序列"
+                f"执行 /ysz 查看所有预设的完整倍投序列"
             )
             await send_to_admin(client, mes, user_ctx, global_config)
             log_event(logging.INFO, 'user_cmd', 'mt', user_id=user_ctx.user_id,
