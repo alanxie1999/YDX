@@ -7774,7 +7774,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                     preset_list = ", ".join(sorted(presets.keys()))
                     mes = (
                         f"<b>❌ 预设不存在：{target_preset}</b>\n\n"
-                        f"• 可用预设：{preset_list}\n\n"
+                        f"• 可用预设：<code>{preset_list}</code>\n\n"
                         f"执行 <code>/ysz</code> 查看所有预设，或 <code>/ysz [预设名]</code> 查看指定预设"
                     )
                 else:
@@ -7785,7 +7785,8 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                     
                     # 计算连续倍投的每一手金额和累计所需资金
                     lines = [
-                        f"<b>【{target_preset}】预设（最多连投 {lose_stop} 手）</b>",
+                        f"<b>📊【{target_preset}】预设（最多连投 {lose_stop} 手）</b>",
+                        "",
                     ]
                     
                     current = base
@@ -7794,32 +7795,32 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                         if i == 1:
                             # 第 1 手：首注
                             current = base
-                            mult_text = "（首注）"
+                            mult_text = "<i>首注</i>"
                         elif i <= 5:
                             # 第 2-5 手：按预设倍率
                             mult = multipliers[i-2]
                             current = int(current * mult)
-                            mult_text = f"（×{mult} 倍）"
+                            mult_text = f"<i>×{mult} 倍</i>"
                         else:
                             # 第 6 手起：继续使用 2.1 倍率
                             current = int(current * multipliers[-1])
-                            mult_text = "（持续倍投）"
+                            mult_text = "<i>持续倍投</i>"
                         
                         total_needed += current
                         
-                        # 完整显示每一手，不省略
-                        lines.append(f"  第{i:2d}手：下注 {_format_money_message(current):>10} | 累计需 {_format_money_message(total_needed):>12} {mult_text}")
+                        # 美化格式：使用 emoji 和对齐
+                        hand_icon = "🎯" if i == 1 else ("⚠️" if i <= 5 else "🔥")
+                        lines.append(f"{hand_icon} 第{i}手：<b>{_format_money_message(current):>12}</b> | 累计：<b>{_format_money_message(total_needed):>12}</b> {mult_text}")
                     
                     # 最后汇总
                     lines.extend([
                         "",
                         f"<b>💰 总需资金：{_format_money_message(total_needed)}</b>",
                         "",
-                        "<b>💡 说明：</b>",
-                        "• 第 1 手为首注金额",
-                        "• 第 2 手起基于前一手金额连续倍投（×3.0→×2.5→×2.2→×2.1）",
-                        "• 每输一手按倍率递增，风险较高请谨慎使用",
-                        "• 触发长龙 5 连或交替 5 位时额外加注 100 万",
+                        f"<b>💡 说明：</b>",
+                        f"• <b>倍投规则：</b>第 1 手为首注，第 2 手起基于前一手金额连续倍投（×3.0→×2.5→×2.2→×2.1）",
+                        f"• <b>风险提示：</b>每输一手按倍率递增，风险较高请谨慎使用",
+                        f"• <b>额外加注：</b>触发长龙 5 连或交替 6 位时额外加注 100 万",
                     ])
                     
                     mes = "\n".join(lines)
