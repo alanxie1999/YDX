@@ -7806,24 +7806,23 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                     if hand_lines:
                         hand_lines[-1] = hand_lines[-1].replace("├", "└", 1)
                     
-                    # 使用统计概览风格
+                    # 完全复刻统计概览风格
                     mes = (
                         f"<b>【 {target_preset} 预设详情 】</b>\n"
-                        f"<b>最多连投：</b><code>{lose_stop:2d}</code> 手\n\n"
+                        f"<b>最多连投：</b>{lose_stop:2d} 手\n\n"
                         
                         f"<b>💵 倍投计划</b>\n"
                         + "\n".join(hand_lines) +
                         f"\n\n<b>💰 总需资金：</b><code>{_format_money_message(total_needed)}</code>\n\n"
                         
                         f"<b>⚙️ 策略参数</b>\n"
-                        f"├ <b>初始金额：</b><code>{_format_money_message(base)}</code>\n"
-                        f"├ <b>倍投系数：</b><code>{multipliers[0]}</code> / <code>{multipliers[1]}</code> / <code>{multipliers[2]}</code> / <code>{multipliers[3]}</code>\n"
-                        f"└ <b>额外加注：</b>长龙 5 连或交替 6 位时 +100 万\n\n"
+                        f"<b>初始金额：</b><code>{_format_money_message(base)}</code>\n"
+                        f"<b>押注倍率：</b><code>{multipliers[0]}</code> / <code>{multipliers[1]}</code> / <code>{multipliers[2]}</code> / <code>{multipliers[3]}</code>\n"
+                        f"<b>额外加注：</b>长龙 5 连或交替 6 位时 +100 万\n\n"
                         
                         f"<b>💡 说明</b>\n"
                         f"• 第 1 手为首注，第 2 手起基于前一手金额连续倍投\n"
-                        f"• 每输一手按倍率递增，总风险为总需资金\n"
-                        f"• 触发额外加注时独立计算，不包含在总需资金内"
+                        f"• 每输一手按倍率递增，总风险为总需资金"
                     )
                 
                 message = await send_to_admin(client, mes, user_ctx, global_config)
@@ -7861,12 +7860,15 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 first_params = presets[sorted(presets.keys())[0]]
                 multipliers = [float(first_params[2]), float(first_params[3]), float(first_params[4]), float(first_params[5])]
                 
+                # 完全复刻统计概览风格
                 mes = (
                     f"<b>【 所有预设倍投一览 】</b>\n\n"
+                    
                     f"<b>💵 预设列表</b>\n"
                     + "\n".join(preset_lines) +
-                    f"\n\n<b>⚙️ 倍投系数</b>\n"
-                    f"└ <code>{multipliers[0]}</code> / <code>{multipliers[1]}</code> / <code>{multipliers[2]}</code> / <code>{multipliers[3]}</code>\n\n"
+                    f"\n\n<b>⚙️ 押注倍率</b>\n"
+                    f"<b>倍投系数：</b><code>{multipliers[0]}</code> / <code>{multipliers[1]}</code> / <code>{multipliers[2]}</code> / <code>{multipliers[3]}</code>\n\n"
+                    
                     f"<b>💡 说明</b>\n"
                     f"• 显示前 5 手下注金额和总需资金\n"
                     f"• 第 2 手起基于前一手金额连续倍投\n"
