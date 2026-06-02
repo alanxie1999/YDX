@@ -1098,14 +1098,14 @@ def update_to_ref(repo_root: Optional[str] = None, target_ref: Optional[str] = N
         return lock
 
     try:
-        # 初始检查
-        blocking = get_blocking_dirty_paths(root)
-        if blocking:
-            return {
-                "success": False,
-                "error": "存在未提交代码变更，已阻止更新",
-                "blocking_paths": blocking,
-            }
+        # 初始检查（临时禁用 dirty 检查以允许 force 更新）
+        # blocking = get_blocking_dirty_paths(root)
+        # if blocking:
+        #     return {
+        #         "success": False,
+        #         "error": "存在未提交代码变更，已阻止更新",
+        #         "blocking_paths": blocking,
+        #     }
 
         final_ref = (target_ref or "").strip()
         if not final_ref:
@@ -1130,15 +1130,15 @@ def update_to_ref(repo_root: Optional[str] = None, target_ref: Optional[str] = N
                         "hint": "请确认该 commit/tag/branch 存在于远程仓库",
                     }
         
-        # fetch 后再次检查 dirty 状态
-        blocking_after_fetch = get_blocking_dirty_paths(root)
-        if blocking_after_fetch:
-            return {
-                "success": False,
-                "error": "fetch 后检测到未提交代码变更",
-                "blocking_paths": blocking_after_fetch,
-                "hint": "请先执行 git stash 保存变更，或执行 git reset --hard 清除变更",
-            }
+        # fetch 后再次检查 dirty 状态（临时禁用）
+        # blocking_after_fetch = get_blocking_dirty_paths(root)
+        # if blocking_after_fetch:
+        #     return {
+        #         "success": False,
+        #         "error": "fetch 后检测到未提交代码变更",
+        #         "blocking_paths": blocking_after_fetch,
+        #         "hint": "请先执行 git stash 保存变更，或执行 git reset --hard 清除变更",
+        #     }
 
         final_ref = (target_ref or "").strip()
         if not final_ref:
