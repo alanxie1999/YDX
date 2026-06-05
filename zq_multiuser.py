@@ -1947,11 +1947,13 @@ def _build_help_card() -> str:
         "• <code>/res state</code> 重置状态（包括大路历史）\n"
         "• <code>/res bet</code> 重置押注策略（连押链路清零）\n\n"
         "<b>📋 预设管理</b>\n"
-        "• <code>/ys [名称] [参数...]</code> 创建或修改预设\n"
+        "• <code>/ys [名称] [连续] [止损] [倍率 1/2/3/4] [金额]</code> 创建或修改预设\n"
         "• <code>/ysz [预设名]</code> 查看指定预设的完整倍投序列\n"
         "• <code>/ysz</code> 查看所有预设的倍投序列\n"
         "• <code>/yss</code> 查看预设列表\n"
         "• <code>/yc [预设名]</code> 测算预设倍投序列\n\n"
+        "<b>示例：</b>\n"
+        "<code>/ys 1w 1 11 3.0 2.5 2.2 2.1 10000</code>"
         "<b>🛠 系统</b>\n"
         "• <code>/ver</code> 查看版本\n"
         "• <code>/update</code> 更新到最新版本\n"
@@ -7954,7 +7956,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 mes = (
                     "📝 **预设创建/修改命令**\n\n"
                     "用法：\n"
-                    "`ys [预设名] [continuous] [lose_stop] [lose_once] [lose_twice] [lose_three] [lose_four] [initial_amount] [bet_direction] [auto_pause_count]`\n\n"
+                    "`ys [预设名] [continuous] [lose_stop] [lose_once] [lose_twice] [lose_three] [lose_four] [initial_amount]`\n\n"
                     "参数说明：\n"
                     "• preset_name: 预设名称（如 5k, 1w）\n"
                     "• continuous: 连续下注次数 (默认 1)\n"
@@ -7963,11 +7965,10 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                     "• lose_twice: 第 3 手倍率 (默认 2.5)\n"
                     "• lose_three: 第 4 手倍率 (默认 2.2)\n"
                     "• lose_four: 第 5 手 + 倍率 (默认 2.1)\n"
-                    "• initial_amount: 初始金额 (如 5000, 10000)\n"
-                    "• bet_direction: same=同向，reverse=反向，auto=跟随 (默认 auto)\n"
-                    "• auto_pause_count: 固定金额连输暂停次数 (默认 0)\n\n"
+                    "• initial_amount: 初始金额 (如 5000, 10000)\n\n"
                     "例：\n"
-                    "`ys 5k 1 12 3.0 2.5 2.2 2.1 5000 auto 0`"
+                    "`ys 1w 1 11 3.0 2.5 2.2 2.1 10000`\n"
+                    "`ys 5k 1 12 3.0 2.5 2.2 2.1 5000`"
                 )
                 message = await send_to_admin(client, mes, user_ctx, global_config)
                 asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
