@@ -295,8 +295,8 @@ HIGH_STEP_DOUBLE_CONFIRM_MODEL_TIMEOUT_SEC = 5.0
 
 # 固定数据规律：检测到特定序列后，按照规律下注
 FIXED_PATTERNS = {
-    "0101010": {"follow": "reverse", "label": "7 位交替"},
-    "1010101": {"follow": "reverse", "label": "7 位交替"},
+    "010101": {"follow": "reverse", "label": "6 位交替"},
+    "101010": {"follow": "reverse", "label": "6 位交替"},
     "11111": {"follow": "1", "label": "5 连长龙"},
     "00000": {"follow": "0", "label": "5 连长龙"},
 }
@@ -2696,9 +2696,9 @@ def extract_pattern_features(history):
             break
     
     is_alternating = False
-    if len(seq_str) >= 7:
-        recent_7 = seq_str[-7:]
-        if recent_7 in ['0101010', '1010101']:
+    if len(seq_str) >= 6:
+        recent_6 = seq_str[-6:]
+        if recent_6 in ['010101', '101010']:
             is_alternating = True
     
     is_symmetric = False
@@ -4849,14 +4849,12 @@ def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
                   data=f"streak={streak}, side={tail_side}, history={''.join(str(x) for x in history[-10:])}")
         return 1000000
 
-    # 检查交替（7 位纯交替）
-    if len(history) >= 7:
-        last_7 = ''.join(str(x) for x in history[-7:])
-        if last_7 in ('0101010', '1010101'):
-            rt["dragon_extra_active"] = True
-            rt["dragon_tail_streak"] = 7
+    # 检查交替（6 位纯交替）
+    if len(history) >= 6:
+        last_6 = ''.join(str(x) for x in history[-6:])
+        if last_6 in ('010101', '101010'):
             log_event(logging.INFO, 'bet_on', '交替额外加注', user_id=0,
-                      data=f"seq={last_7}, history={''.join(str(x) for x in history[-10:])}")
+                      data=f"seq={last_6}, history={''.join(str(x) for x in history[-10:])}")
             return 1000000
 
     # 非特殊形态：清除额外加注状态
