@@ -9,7 +9,10 @@
 - Context: 用户要求在每次代码更新时都要更新版本号
 - Instructions:
   - 每次修改代码并提交后，必须更新版本号
-  - 版本号格式：主版本。次版本.修订版 (如 1.0.11)
-  - 需要更新的文件：main_multiuser.py, constants.py, user_manager.py
-  - 版本号注释格式：`版本：1.0.11`
+  - 版本号格式：主版本。次版本。修订版 (如 1.0.11)
+  - 需要更新的文件：main_multiuser.py, constants.py, user_manager.py, zq_multiuser.py
+  - 版本号注释格式：`版本：1.0.11`（放在文件头部）
+  - 所有文件的版本号必须保持一致
   - 提交信息应包含版本号更新说明
+  - 修改完成后必须创建并推送对应的 git tag (如 v1.0.11)
+  - 使用命令：`git tag -a "v1.0.11" -m "Release v1.0.11"` 和 `git push origin v1.0.11`
