@@ -1947,13 +1947,15 @@ def _build_help_card() -> str:
         "• <code>/res state</code> 重置状态（包括大路历史）\n"
         "• <code>/res bet</code> 重置押注策略（连押链路清零）\n\n"
         "<b>📋 预设管理</b>\n"
-        "• <code>/ys [名称] [连续] [止损] [倍率 1/2/3/4] [金额]</code> 创建或修改预设\n"
+        "• <code>/ys 替换 [名] [参数...]</code> 创建或替换预设\n"
+        "• <code>/ys 删除 [名]</code> 删除预设\n"
         "• <code>/ysz [预设名]</code> 查看指定预设的完整倍投序列\n"
         "• <code>/ysz</code> 查看所有预设的倍投序列\n"
         "• <code>/yss</code> 查看预设列表\n"
         "• <code>/yc [预设名]</code> 测算预设倍投序列\n\n"
         "<b>示例：</b>\n"
-        "<code>/ys 1w 1 11 3.0 2.5 2.2 2.1 10000</code>"
+        "<code>/ys 替换 1w 1 11 3.0 2.5 2.2 2.1 10000</code>\n"
+        "<code>/ys 删除 1w</code>"
         "<b>🛠 系统</b>\n"
         "• <code>/ver</code> 查看版本\n"
         "• <code>/update</code> 更新到最新版本\n"
@@ -7954,9 +7956,10 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
         if cmd == "ys":
             if len(my) < 3:
                 mes = (
-                    "📝 **预设创建/修改命令**\n\n"
+                    "📝 **预设创建/修改/删除命令**\n\n"
                     "用法：\n"
-                    "`ys [预设名] [continuous] [lose_stop] [lose_once] [lose_twice] [lose_three] [lose_four] [initial_amount]`\n\n"
+                    "`ys 替换 [预设名] [continuous] [lose_stop] [lose_once] [lose_twice] [lose_three] [lose_four] [initial_amount]`\n"
+                    "`ys 删除 [预设名]`\n\n"
                     "参数说明：\n"
                     "• preset_name: 预设名称（如 5k, 1w）\n"
                     "• continuous: 连续下注次数 (默认 1)\n"
@@ -7967,8 +7970,8 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                     "• lose_four: 第 5 手 + 倍率 (默认 2.1)\n"
                     "• initial_amount: 初始金额 (如 5000, 10000)\n\n"
                     "例：\n"
-                    "`ys 1w 1 11 3.0 2.5 2.2 2.1 10000`\n"
-                    "`ys 5k 1 12 3.0 2.5 2.2 2.1 5000`"
+                    "`ys 替换 1w 1 11 3.0 2.5 2.2 2.1 10000`\n"
+                    "`ys 删除 1w`"
                 )
                 message = await send_to_admin(client, mes, user_ctx, global_config)
                 asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
@@ -7976,57 +7979,97 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                     asyncio.create_task(delete_later(client, message.chat_id, message.id, 60))
                 return
             
-            preset_name = my[1]
-            try:
-                # 解析参数（支持部分参数，使用默认值）
-                continuous = int(my[2]) if len(my) > 2 else 1
-                lose_stop = int(my[3]) if len(my) > 3 else 8
-                lose_once = float(my[4]) if len(my) > 4 else 3.0
-                lose_twice = float(my[5]) if len(my) > 5 else 2.5
-                lose_three = float(my[6]) if len(my) > 6 else 2.2
-                lose_four = float(my[7]) if len(my) > 7 else 2.1
-                initial_amount = int(my[8]) if len(my) > 8 else 5000
-                bet_direction = my[9] if len(my) > 9 else "auto"
-                auto_pause_count = my[10] if len(my) > 10 else "0"
+            action = my[1].lower()
+            
+            # 删除预设
+            if action in ["删除", "del", "delete", "rm"]:
+                if len(my) < 3:
+                    mes = "❌ 请提供要删除的预设名称\n\n例：`ys 删除 1w`"
+                    message = await send_to_admin(client, mes, user_ctx, global_config)
+                    asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
+                    return
                 
-                # 创建或更新预设
+                preset_name = my[2]
                 presets = user_ctx.presets
-                is_update = preset_name in presets
-                presets[preset_name] = [
-                    str(continuous), str(lose_stop), str(lose_once), str(lose_twice),
-                    str(lose_three), str(lose_four), str(initial_amount), bet_direction, auto_pause_count
-                ]
-                user_ctx.save_presets()
+                if preset_name not in presets:
+                    mes = f"❌ 预设不存在：{preset_name}\n\n执行 `/yss` 查看可用预设"
+                else:
+                    del presets[preset_name]
+                    user_ctx.save_presets()
+                    mes = f"✅ 预设已删除：{preset_name}"
+                    log_event(logging.INFO, 'user_cmd', '删除预设', user_id=user_ctx.user_id, preset=preset_name)
                 
-                mes = (
-                    f"✅ 预设{'修改' if is_update else '创建'}成功：{preset_name}\n\n"
-                    f"参数：\n"
-                    f"• 连续下注：{continuous}\n"
-                    f"• 最大连投：{lose_stop} 手\n"
-                    f"• 倍投系数：{lose_once} / {lose_twice} / {lose_three} / {lose_four}\n"
-                    f"• 初始金额：{_format_money_message(initial_amount)}\n"
-                    f"• 押注方向：{bet_direction}\n"
-                    f"• 自动暂停：{auto_pause_count}\n\n"
-                    f"说明：\n"
-                    f"• 执行 `/st {preset_name}` 切换到该预设\n"
-                    f"• 执行 `/ysz {preset_name}` 查看完整倍投序列"
-                )
-                log_event(logging.INFO, 'user_cmd', '创建/修改预设', user_id=user_ctx.user_id, preset=preset_name, is_update=is_update)
                 message = await send_to_admin(client, mes, user_ctx, global_config)
                 asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
                 if message:
                     asyncio.create_task(delete_later(client, message.chat_id, message.id, 60))
-            except (ValueError, IndexError) as e:
-                mes = (
-                    f"❌ 预设{'修改' if preset_name in user_ctx.presets else '创建'}失败\n\n"
-                    f"错误：参数格式不正确\n\n"
-                    f"请执行 `ys` 查看命令用法"
-                )
-                log_event(logging.WARNING, 'user_cmd', '创建/修改预设失败', user_id=user_ctx.user_id, preset=preset_name, error=str(e))
-                message = await send_to_admin(client, mes, user_ctx, global_config)
-                asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
-                if message:
-                    asyncio.create_task(delete_later(client, message.chat_id, message.id, 10))
+                return
+            
+            # 替换/创建预设
+            if action in ["替换", "replace", "set", "update"]:
+                preset_name = my[2]
+                try:
+                    # 解析参数（支持部分参数，使用默认值）
+                    continuous = int(my[3]) if len(my) > 3 else 1
+                    lose_stop = int(my[4]) if len(my) > 4 else 8
+                    lose_once = float(my[5]) if len(my) > 5 else 3.0
+                    lose_twice = float(my[6]) if len(my) > 6 else 2.5
+                    lose_three = float(my[7]) if len(my) > 7 else 2.2
+                    lose_four = float(my[8]) if len(my) > 8 else 2.1
+                    initial_amount = int(my[9]) if len(my) > 9 else 5000
+                    bet_direction = my[10] if len(my) > 10 else "auto"
+                    auto_pause_count = my[11] if len(my) > 11 else "0"
+                    
+                    # 创建或更新预设
+                    presets = user_ctx.presets
+                    is_update = preset_name in presets
+                    presets[preset_name] = [
+                        str(continuous), str(lose_stop), str(lose_once), str(lose_twice),
+                        str(lose_three), str(lose_four), str(initial_amount), bet_direction, auto_pause_count
+                    ]
+                    user_ctx.save_presets()
+                    
+                    mes = (
+                        f"✅ 预设{'替换' if is_update else '创建'}成功：{preset_name}\n\n"
+                        f"参数：\n"
+                        f"• 连续下注：{continuous}\n"
+                        f"• 最大连投：{lose_stop} 手\n"
+                        f"• 倍投系数：{lose_once} / {lose_twice} / {lose_three} / {lose_four}\n"
+                        f"• 初始金额：{_format_money_message(initial_amount)}\n"
+                        f"• 押注方向：{bet_direction}\n"
+                        f"• 自动暂停：{auto_pause_count}\n\n"
+                        f"说明：\n"
+                        f"• 执行 `/st {preset_name}` 切换到该预设\n"
+                        f"• 执行 `/ysz {preset_name}` 查看完整倍投序列"
+                    )
+                    log_event(logging.INFO, 'user_cmd', '替换/创建预设', user_id=user_ctx.user_id, preset=preset_name, is_update=is_update)
+                    message = await send_to_admin(client, mes, user_ctx, global_config)
+                    asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
+                    if message:
+                        asyncio.create_task(delete_later(client, message.chat_id, message.id, 60))
+                except (ValueError, IndexError) as e:
+                    mes = (
+                        f"❌ 预设{'替换' if preset_name in presets else '创建'}失败\n\n"
+                        f"错误：参数格式不正确\n\n"
+                        f"请执行 `ys` 查看命令用法"
+                    )
+                    log_event(logging.WARNING, 'user_cmd', '替换/创建预设失败', user_id=user_ctx.user_id, preset=preset_name, error=str(e))
+                    message = await send_to_admin(client, mes, user_ctx, global_config)
+                    asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
+                    if message:
+                        asyncio.create_task(delete_later(client, message.chat_id, message.id, 10))
+                return
+            
+            # 未知的操作
+            mes = (
+                f"❌ 未知的操作：{action}\n\n"
+                f"支持的操作：`替换`、`删除`\n\n"
+                f"请执行 `ys` 查看命令用法"
+            )
+            message = await send_to_admin(client, mes, user_ctx, global_config)
+            asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
+            if message:
+                asyncio.create_task(delete_later(client, message.chat_id, message.id, 60))
             return
         
         # ========== 多用户管理命令 ==========
