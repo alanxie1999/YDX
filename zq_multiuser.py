@@ -6389,9 +6389,10 @@ async def _process_settle_slim(client, event, user_ctx: UserContext, global_conf
                     int(active_chain_summary.get("lose_count", 0)),
                     int(old_lose_count) + 1,
                 )
-                # 长龙额外加注不中后，按默认金额下注
+                # 长龙额外加注不中后，重置为初始金额重新开始
                 if rt.get("dragon_extra_active", False):
                     rt["bet_amount"] = int(rt.get("initial_amount", 500))
+                    rt["lose_count"] = 0  # 重置连输计数，下一手按初始金额下注
                     rt["dragon_extra_active"] = False
                     rt["dragon_tail_streak"] = 0
                 else:
