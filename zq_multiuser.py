@@ -665,7 +665,17 @@ def _apply_inferred_settle_from_history(state: UserState, rt: Dict[str, Any], op
             rt["dragon_extra_active"] = False
             rt["dragon_tail_streak"] = 0
         else:
-            rt["bet_amount"] = int(active_chain_summary.get("last_amount", bet_amount) or bet_amount)
+            # 按 initial_amount×系数重新计算倍投金额，避免 dragon_extra 污染
+            initial_amount = int(rt.get("initial_amount", 500))
+            lose_count = rt["lose_count"]
+            if lose_count == 1:
+                rt["bet_amount"] = int(initial_amount * rt.get("lose_once", 3.0))
+            elif lose_count == 2:
+                rt["bet_amount"] = int(initial_amount * rt.get("lose_twice", 2.5))
+            elif lose_count == 3:
+                rt["bet_amount"] = int(initial_amount * rt.get("lose_three", 2.2))
+            else:
+                rt["bet_amount"] = int(initial_amount * rt.get("lose_four", 2.1))
     
     # 固定金额模式：连输达到 auto_pause_count 后标记待暂停
     auto_pause_count = int(rt.get("auto_pause_count", 0) or 0)
@@ -6401,7 +6411,17 @@ async def _process_settle_slim(client, event, user_ctx: UserContext, global_conf
                     rt["dragon_extra_active"] = False
                     rt["dragon_tail_streak"] = 0
                 else:
-                    rt["bet_amount"] = int(active_chain_summary.get("last_amount", bet_amount) or bet_amount)
+                    # 按 initial_amount×系数重新计算倍投金额，避免 dragon_extra 污染
+                    initial_amount = int(rt.get("initial_amount", 500))
+                    lose_count = rt["lose_count"]
+                    if lose_count == 1:
+                        rt["bet_amount"] = int(initial_amount * rt.get("lose_once", 3.0))
+                    elif lose_count == 2:
+                        rt["bet_amount"] = int(initial_amount * rt.get("lose_twice", 2.5))
+                    elif lose_count == 3:
+                        rt["bet_amount"] = int(initial_amount * rt.get("lose_three", 2.2))
+                    else:
+                        rt["bet_amount"] = int(initial_amount * rt.get("lose_four", 2.1))
 
             if _verbose_runtime_diag_enabled():
                 log_event(
