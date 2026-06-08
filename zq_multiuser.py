@@ -4822,14 +4822,9 @@ def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
     - 6 位纯交替：额外加 1000000
     
     触发条件：
-    - 第 1 手（lose_count=0）：不加注，严格按 preset 金额
-    - 第 2 手起（lose_count>0）：检测到形态即加注 100 万
+    - 检测到形态即加注 100 万（无论 lose_count 是多少）
     - 额外加注不中后：lose_count 重置，下手机重新检测
     """
-    # 第 1 手不加注，严格按 preset 金额
-    if rt.get("lose_count", 0) == 0:
-        return 0
-    
     if history is None:
         history = rt.get("_current_history", [])
         if not history:
