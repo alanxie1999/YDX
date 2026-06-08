@@ -4839,6 +4839,8 @@ def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
     if len(history) >= 6:
         last_6 = ''.join(str(x) for x in history[-6:])
         if last_6 in ('010101', '101010'):
+            rt["dragon_extra_active"] = True
+            rt["dragon_tail_streak"] = 6
             log_event(logging.INFO, 'bet_on', '交替额外加注', user_id=0,
                       data=f"seq={last_6}, history={''.join(str(x) for x in history[-10:])}")
             return 1000000
@@ -4846,10 +4848,13 @@ def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
     # 检查长龙（5 连以上）
     streak, tail_side = _get_history_tail_streak(history)
     if streak >= 5:
+        rt["dragon_extra_active"] = True
+        rt["dragon_tail_streak"] = streak
         log_event(logging.INFO, 'bet_on', '长龙额外加注', user_id=0,
                   data=f"streak={streak}, side={tail_side}, history={''.join(str(x) for x in history[-10:])}")
         return 1000000
     
+    rt["dragon_extra_active"] = False
     return 0
 
 
