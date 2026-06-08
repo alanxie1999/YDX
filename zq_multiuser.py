@@ -665,17 +665,8 @@ def _apply_inferred_settle_from_history(state: UserState, rt: Dict[str, Any], op
             rt["dragon_extra_active"] = False
             rt["dragon_tail_streak"] = 0
         else:
-            # 按 initial_amount×系数重新计算倍投金额，避免 dragon_extra 污染
-            initial_amount = int(rt.get("initial_amount", 500))
-            lose_count = rt["lose_count"]
-            if lose_count == 1:
-                rt["bet_amount"] = int(initial_amount * rt.get("lose_once", 3.0))
-            elif lose_count == 2:
-                rt["bet_amount"] = int(initial_amount * rt.get("lose_twice", 2.5))
-            elif lose_count == 3:
-                rt["bet_amount"] = int(initial_amount * rt.get("lose_three", 2.2))
-            else:
-                rt["bet_amount"] = int(initial_amount * rt.get("lose_four", 2.1))
+            # 累积倍投：基于上一手 bet_amount 继续倍投
+            rt["bet_amount"] = int(active_chain_summary.get("last_amount", bet_amount) or bet_amount)
     
     # 固定金额模式：连输达到 auto_pause_count 后标记待暂停
     auto_pause_count = int(rt.get("auto_pause_count", 0) or 0)
@@ -4792,9 +4783,10 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
     is_fixed_bet = (lose_once == 1.0 and lose_twice == 1.0 and 
                     lose_three == 1.0 and lose_four == 1.0)
 
+    dragon_extra = _get_dragon_extra_bet_amount(rt, history)
+
     if win_count >= 0 and lose_count == 0:
         base = constants.closest_multiple_of_500(initial_amount)
-        dragon_extra = _get_dragon_extra_bet_amount(rt, history)
         return base + dragon_extra
 
     if (lose_count + 1) > lose_stop:
@@ -4802,12 +4794,10 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
 
     # 固定金额模式：不倍投，始终返回初始金额
     if is_fixed_bet:
-        base = constants.closest_multiple_of_500(initial_amount)
-        dragon_extra = _get_dragon_extra_bet_amount(rt, history)
-        return base + dragon_extra
+        return constants.closest_multiple_of_500(initial_amount) + dragon_extra
 
-    # 用 initial_amount 作为基数，避免 dragon_extra 污染倍投计算
-    base_amount = initial_amount
+    # 累积倍投：基于上一手 bet_amount 继续倍投
+    base_amount = int(rt.get("bet_amount", initial_amount))
     if lose_count == 1:
         target = base_amount * lose_once
     elif lose_count == 2:
@@ -4819,9 +4809,6 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
 
     # 与 master 一致：补 1% 安全边际
     base = constants.closest_multiple_of_500(target + target * 0.01)
-    
-    # 最后才计算 dragon_extra，避免影响 base 的计算
-    dragon_extra = _get_dragon_extra_bet_amount(rt, history)
     return base + dragon_extra
 
 
@@ -6411,17 +6398,8 @@ async def _process_settle_slim(client, event, user_ctx: UserContext, global_conf
                     rt["dragon_extra_active"] = False
                     rt["dragon_tail_streak"] = 0
                 else:
-                    # 按 initial_amount×系数重新计算倍投金额，避免 dragon_extra 污染
-                    initial_amount = int(rt.get("initial_amount", 500))
-                    lose_count = rt["lose_count"]
-                    if lose_count == 1:
-                        rt["bet_amount"] = int(initial_amount * rt.get("lose_once", 3.0))
-                    elif lose_count == 2:
-                        rt["bet_amount"] = int(initial_amount * rt.get("lose_twice", 2.5))
-                    elif lose_count == 3:
-                        rt["bet_amount"] = int(initial_amount * rt.get("lose_three", 2.2))
-                    else:
-                        rt["bet_amount"] = int(initial_amount * rt.get("lose_four", 2.1))
+                    # 累积倍投：基于上一手 bet_amount 继续倍投
+                    rt["bet_amount"] = int(active_chain_summary.get("last_amount", bet_amount) or bet_amount)
 
             if _verbose_runtime_diag_enabled():
                 log_event(
