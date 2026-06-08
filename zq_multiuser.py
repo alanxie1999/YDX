@@ -4782,10 +4782,9 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
     is_fixed_bet = (lose_once == 1.0 and lose_twice == 1.0 and 
                     lose_three == 1.0 and lose_four == 1.0)
 
-    dragon_extra = _get_dragon_extra_bet_amount(rt, history)
-
     if win_count >= 0 and lose_count == 0:
         base = constants.closest_multiple_of_500(initial_amount)
+        dragon_extra = _get_dragon_extra_bet_amount(rt, history)
         return base + dragon_extra
 
     if (lose_count + 1) > lose_stop:
@@ -4793,9 +4792,12 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
 
     # 固定金额模式：不倍投，始终返回初始金额
     if is_fixed_bet:
-        return constants.closest_multiple_of_500(initial_amount) + dragon_extra
+        base = constants.closest_multiple_of_500(initial_amount)
+        dragon_extra = _get_dragon_extra_bet_amount(rt, history)
+        return base + dragon_extra
 
-    base_amount = int(rt.get("bet_amount", initial_amount))
+    # 用 initial_amount 作为基数，避免 dragon_extra 污染倍投计算
+    base_amount = initial_amount
     if lose_count == 1:
         target = base_amount * lose_once
     elif lose_count == 2:
@@ -4807,6 +4809,9 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
 
     # 与 master 一致：补 1% 安全边际
     base = constants.closest_multiple_of_500(target + target * 0.01)
+    
+    # 最后才计算 dragon_extra，避免影响 base 的计算
+    dragon_extra = _get_dragon_extra_bet_amount(rt, history)
     return base + dragon_extra
 
 
