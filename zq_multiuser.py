@@ -4832,7 +4832,7 @@ def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
     else:
         rt["_history_cache"] = history
     
-    if not isinstance(history, list) or len(history) < 6:
+    if not isinstance(history, list) or len(history) < 5:
         return 0
     
     # 检查交替（6 位纯交替）
