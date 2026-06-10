@@ -658,15 +658,9 @@ def _apply_inferred_settle_from_history(state: UserState, rt: Dict[str, Any], op
             int(active_chain_summary.get("lose_count", 0)),
             old_lose_count + 1,
         )
-        # 长龙额外加注不中后，重置为初始金额重新开始
-        if rt.get("dragon_has_bet", False):
-            rt["bet_amount"] = int(rt.get("initial_amount", 500))
-            rt["lose_count"] = 0  # 重置连输计数，下一手按初始金额下注
-            rt["dragon_has_bet"] = False
-            rt["dragon_tail_streak"] = 0
-        else:
-            # 累积倍投：基于上一手 bet_amount 继续倍投
-            rt["bet_amount"] = int(active_chain_summary.get("last_amount", bet_amount) or bet_amount)
+        # 额外加注不中后不重置，继续累积倍投
+        # 使用 last_base_amount（不含 dragon）更新 bet_amount
+        rt["bet_amount"] = int(rt.get("last_base_amount", bet_amount) or bet_amount)
     
     # 固定金额模式：连输达到 auto_pause_count 后标记待暂停
     auto_pause_count = int(rt.get("auto_pause_count", 0) or 0)
@@ -4787,6 +4781,7 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
 
     if win_count >= 0 and lose_count == 0:
         base = constants.closest_multiple_of_500(initial_amount)
+        rt["last_base_amount"] = base
         return base + dragon_extra
 
     if (lose_count + 1) > lose_stop:
@@ -4794,7 +4789,9 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
 
     # 固定金额模式：不倍投，始终返回初始金额
     if is_fixed_bet:
-        return constants.closest_multiple_of_500(initial_amount) + dragon_extra
+        base = constants.closest_multiple_of_500(initial_amount)
+        rt["last_base_amount"] = base
+        return base + dragon_extra
 
     # 累积倍投：基于上一手 bet_amount 继续倍投
     base_amount = int(rt.get("bet_amount", initial_amount))
@@ -4809,6 +4806,9 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
 
     # 与 master 一致：补 1% 安全边际
     base = constants.closest_multiple_of_500(target + target * 0.01)
+    
+    # 存储 base 金额用于结算（不含 dragon）
+    rt["last_base_amount"] = base
     return base + dragon_extra
 
 
@@ -4819,8 +4819,9 @@ def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
     - 6 位纯交替：额外加 1000000
     
     触发条件：
-    - 检测到形态即加注 100 万（无论 lose_count 是多少）
-    - 额外加注不中后：lose_count 重置，下手机重新检测
+    - 每手检测到形态都触发额外加注 100 万
+    - 额外加注金额不计入倍投基数
+    - 额外加注不中后不重置，继续累积倍投
     """
     if history is None:
         history = rt.get("_current_history", [])
@@ -4832,11 +4833,14 @@ def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
     if not isinstance(history, list) or len(history) < 5:
         return 0
     
+    # 标记当前是否包含额外加注（用于结算时判断）
+    has_extra_bet = False
+    
     # 检查交替（6 位纯交替）
     if len(history) >= 6:
         last_6 = ''.join(str(x) for x in history[-6:])
         if last_6 in ('010101', '101010'):
-            rt["dragon_has_bet"] = True  # 标记当前下注包含额外加注
+            rt["dragon_has_bet"] = True
             rt["dragon_tail_streak"] = 6
             log_event(logging.INFO, 'bet_on', '交替额外加注', user_id=0,
                       data=f"seq={last_6}, history={''.join(str(x) for x in history[-10:])}")
@@ -4845,7 +4849,7 @@ def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
     # 检查长龙（5 连以上）
     streak, tail_side = _get_history_tail_streak(history)
     if streak >= 5:
-        rt["dragon_has_bet"] = True  # 标记当前下注包含额外加注
+        rt["dragon_has_bet"] = True
         rt["dragon_tail_streak"] = streak
         log_event(logging.INFO, 'bet_on', '长龙额外加注', user_id=0,
                   data=f"streak={streak}, side={tail_side}, history={''.join(str(x) for x in history[-10:])}")
@@ -6391,15 +6395,9 @@ async def _process_settle_slim(client, event, user_ctx: UserContext, global_conf
                     int(active_chain_summary.get("lose_count", 0)),
                     int(old_lose_count) + 1,
                 )
-                # 长龙额外加注不中后，重置为初始金额重新开始
-                if rt.get("dragon_has_bet", False):
-                    rt["bet_amount"] = int(rt.get("initial_amount", 500))
-                    rt["lose_count"] = 0  # 重置连输计数，下一手按初始金额下注
-                    rt["dragon_has_bet"] = False
-                    rt["dragon_tail_streak"] = 0
-                else:
-                    # 累积倍投：基于上一手 bet_amount 继续倍投
-                    rt["bet_amount"] = int(active_chain_summary.get("last_amount", bet_amount) or bet_amount)
+                # 额外加注不中后不重置，继续累积倍投
+                # 使用 last_base_amount（不含 dragon）更新 bet_amount
+                rt["bet_amount"] = int(rt.get("last_base_amount", bet_amount) or bet_amount)
 
             if _verbose_runtime_diag_enabled():
                 log_event(
