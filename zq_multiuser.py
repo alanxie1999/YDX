@@ -1,9 +1,9 @@
 """
 zq_multiuser.py - 多用户版本核心逻辑
-版本：1.0.25
+版本：1.0.26
 日期：2026-06-22
 功能：多用户押注、结算、命令处理
-更新：新增 edb 额外长龙下注开关
+更新：长龙额外加注失手后抑制本轮后续加注，不重置倍投链
 """
 
 import logging
@@ -658,15 +658,13 @@ def _apply_inferred_settle_from_history(state: UserState, rt: Dict[str, Any], op
             int(active_chain_summary.get("lose_count", 0)),
             old_lose_count + 1,
         )
-        # 长龙额外加注不中后，重置为初始金额重新开始
+        # 长龙额外加注不中后，抑制本轮后续长龙额外加注，继续正常倍投链
         if rt.get("dragon_has_bet", False):
-            rt["bet_amount"] = int(rt.get("initial_amount", 500))
-            rt["lose_count"] = 0  # 重置连输计数，下一手按初始金额下注
             rt["dragon_has_bet"] = False
             rt["dragon_tail_streak"] = 0
-        else:
-            # 累积倍投：基于上一手 bet_amount 继续倍投
-            rt["bet_amount"] = int(active_chain_summary.get("last_amount", bet_amount) or bet_amount)
+            rt["dragon_extra_suppressed"] = True
+        # 累积倍投：基于上一手 bet_amount 继续倍投
+        rt["bet_amount"] = int(active_chain_summary.get("last_amount", bet_amount) or bet_amount)
     
     # 固定金额模式：连输达到 auto_pause_count 后标记待暂停
     auto_pause_count = int(rt.get("auto_pause_count", 0) or 0)
@@ -682,6 +680,7 @@ def _apply_inferred_settle_from_history(state: UserState, rt: Dict[str, Any], op
     if win or rt.get("lose_count", 0) >= rt.get("lose_stop", 13):
         rt["bet_sequence_count"] = 0
         rt["bet_amount"] = int(rt.get("initial_amount", 500))
+        rt["dragon_extra_suppressed"] = False
 
     return {
         "win": win,
@@ -4151,6 +4150,7 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
             rt["stop_count"] = 10
             rt["bet_sequence_count"] = 0
             rt["bet_amount"] = int(rt.get("initial_amount", 500))
+            rt["dragon_extra_suppressed"] = False
             rt["lose_count"] = 0
             rt["win_count"] = 0
             rt["earnings"] = rt.get("earnings", 0)  # 移除 profit 引用
@@ -4823,7 +4823,7 @@ def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
     
     触发条件：
     - 检测到形态即加注 100 万（无论 lose_count 是多少）
-    - 额外加注不中后：lose_count 重置，下手机重新检测
+     - 额外加注不中后：只清除长龙标记，倍投链继续正常推进
     """
     if history is None:
         history = rt.get("_current_history", [])
@@ -4833,6 +4833,10 @@ def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
         rt["_history_cache"] = history
     
     if not rt.get("extra_dragon_bet_enabled", True):
+        rt["dragon_has_bet"] = False
+        return 0
+
+    if rt.get("dragon_extra_suppressed", False):
         rt["dragon_has_bet"] = False
         return 0
 
@@ -6398,15 +6402,13 @@ async def _process_settle_slim(client, event, user_ctx: UserContext, global_conf
                     int(active_chain_summary.get("lose_count", 0)),
                     int(old_lose_count) + 1,
                 )
-                # 长龙额外加注不中后，重置为初始金额重新开始
+                # 长龙额外加注不中后，抑制本轮后续长龙额外加注，继续正常倍投链
                 if rt.get("dragon_has_bet", False):
-                    rt["bet_amount"] = int(rt.get("initial_amount", 500))
-                    rt["lose_count"] = 0  # 重置连输计数，下一手按初始金额下注
                     rt["dragon_has_bet"] = False
                     rt["dragon_tail_streak"] = 0
-                else:
-                    # 累积倍投：基于上一手 bet_amount 继续倍投
-                    rt["bet_amount"] = int(active_chain_summary.get("last_amount", bet_amount) or bet_amount)
+                    rt["dragon_extra_suppressed"] = True
+                # 累积倍投：基于上一手 bet_amount 继续倍投
+                rt["bet_amount"] = int(active_chain_summary.get("last_amount", bet_amount) or bet_amount)
 
             if _verbose_runtime_diag_enabled():
                 log_event(
@@ -6525,6 +6527,7 @@ async def _process_settle_slim(client, event, user_ctx: UserContext, global_conf
             if win or rt.get("lose_count", 0) >= rt.get("lose_stop", 13):
                 rt["bet_sequence_count"] = 0
                 rt["bet_amount"] = int(rt.get("initial_amount", 500))
+                rt["dragon_extra_suppressed"] = False
 
         await _apply_settle_fund_safety_guard()
 
