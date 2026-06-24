@@ -1560,7 +1560,7 @@ def _format_total_profit_value(value: Any) -> str:
 
 
 def _build_recent_history_grid(history: List[int], limit: int = 40) -> str:
-    recent = history[-limit:][::-1]
+    recent = history[-limit:]
     if not recent:
         return "暂无数据"
     icons = ["✅" if x == 1 else "❌" for x in recent]
