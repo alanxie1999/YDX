@@ -661,6 +661,7 @@ def _apply_inferred_settle_from_history(state: UserState, rt: Dict[str, Any], op
         # 长龙额外加注不中后，重置为初始金额重新开始
         if rt.get("dragon_has_bet", False):
             rt["bet_amount"] = int(rt.get("initial_amount", 500))
+            rt["_bet_base"] = int(rt.get("initial_amount", 500))
             rt["lose_count"] = 0  # 重置连输计数，下一手按初始金额下注
             rt["dragon_has_bet"] = False
             rt["dragon_tail_streak"] = 0
@@ -682,6 +683,7 @@ def _apply_inferred_settle_from_history(state: UserState, rt: Dict[str, Any], op
     if win or rt.get("lose_count", 0) >= rt.get("lose_stop", 13):
         rt["bet_sequence_count"] = 0
         rt["bet_amount"] = int(rt.get("initial_amount", 500))
+        rt["_bet_base"] = int(rt.get("initial_amount", 500))
 
     return {
         "win": win,
@@ -4790,6 +4792,7 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
 
     if win_count >= 0 and lose_count == 0:
         base = constants.closest_multiple_of_500(initial_amount)
+        rt["_bet_base"] = base
         return base + dragon_extra
 
     if (lose_count + 1) > lose_stop:
@@ -4797,10 +4800,12 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
 
     # 固定金额模式：不倍投，始终返回初始金额
     if is_fixed_bet:
-        return constants.closest_multiple_of_500(initial_amount) + dragon_extra
+        base = constants.closest_multiple_of_500(initial_amount)
+        rt["_bet_base"] = base
+        return base + dragon_extra
 
-    # 累积倍投：基于上一手 bet_amount 继续倍投
-    base_amount = int(rt.get("bet_amount", initial_amount))
+    # 累积倍投：基于 _bet_base 继续倍投（不含龙额外加注，避免 200 万倍投放大）
+    base_amount = int(rt.get("_bet_base", initial_amount))
     if lose_count == 1:
         target = base_amount * lose_once
     elif lose_count == 2:
@@ -4812,6 +4817,7 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
 
     # 与 master 一致：补 1% 安全边际
     base = constants.closest_multiple_of_500(target + target * 0.01)
+    rt["_bet_base"] = base
     return base + dragon_extra
 
 
@@ -6401,6 +6407,7 @@ async def _process_settle_slim(client, event, user_ctx: UserContext, global_conf
                 # 长龙额外加注不中后，重置为初始金额重新开始
                 if rt.get("dragon_has_bet", False):
                     rt["bet_amount"] = int(rt.get("initial_amount", 500))
+                    rt["_bet_base"] = int(rt.get("initial_amount", 500))
                     rt["lose_count"] = 0  # 重置连输计数，下一手按初始金额下注
                     rt["dragon_has_bet"] = False
                     rt["dragon_tail_streak"] = 0
@@ -6525,6 +6532,7 @@ async def _process_settle_slim(client, event, user_ctx: UserContext, global_conf
             if win or rt.get("lose_count", 0) >= rt.get("lose_stop", 13):
                 rt["bet_sequence_count"] = 0
                 rt["bet_amount"] = int(rt.get("initial_amount", 500))
+                rt["_bet_base"] = int(rt.get("initial_amount", 500))
 
         await _apply_settle_fund_safety_guard()
 
