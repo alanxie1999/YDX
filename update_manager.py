@@ -263,8 +263,8 @@ def _git_fetch_tags(root: Path, remote_name: str, github_token: str = "") -> sub
     token = (github_token or "").strip()
     if token:
         cmd += ["-c", f"http.extraheader={_build_git_auth_header(token)}"]
-    # 添加 --prune 清理已删除的远程标签，避免产生过多临时引用
-    cmd += ["fetch", "--force", "--tags", "--prune", remote_name]
+    # 添加 --prune --prune-tags 清理已删除的远程标签
+    cmd += ["fetch", "--force", "--tags", "--prune", "--prune-tags", remote_name]
     return _run_cmd(cmd, root, timeout=120)
 
 
