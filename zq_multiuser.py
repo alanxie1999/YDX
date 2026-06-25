@@ -682,6 +682,7 @@ def _apply_inferred_settle_from_history(state: UserState, rt: Dict[str, Any], op
     
     if win or rt.get("lose_count", 0) >= rt.get("lose_stop", 13):
         rt["bet_sequence_count"] = 0
+        rt["lose_count"] = 0
         rt["bet_amount"] = int(rt.get("initial_amount", 500))
         rt["_bet_base"] = int(rt.get("initial_amount", 500))
 
@@ -6545,6 +6546,7 @@ async def _process_settle_slim(client, event, user_ctx: UserContext, global_conf
 
             if win or rt.get("lose_count", 0) >= rt.get("lose_stop", 13):
                 rt["bet_sequence_count"] = 0
+                rt["lose_count"] = 0
                 rt["bet_amount"] = int(rt.get("initial_amount", 500))
                 rt["_bet_base"] = int(rt.get("initial_amount", 500))
 
