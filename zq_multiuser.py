@@ -7166,6 +7166,10 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 rt["initial_amount"] = int(preset[6])
                 rt["current_preset_name"] = preset_name
                 rt["bet_amount"] = int(preset[6])
+                rt["_bet_base"] = int(preset[6])
+                rt["lose_count"] = 0
+                rt["win_count"] = 0
+                rt["bet_sequence_count"] = 0
                 # 读取方向参数（第 8 个参数，可选）
                 bet_direction = preset[7] if len(preset) > 7 else "auto"
                 rt["bet_direction"] = bet_direction
