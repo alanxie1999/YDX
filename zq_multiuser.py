@@ -1,6 +1,6 @@
 """
 zq_multiuser.py - 多用户版本核心逻辑
-版本：1.0.26
+版本：1.0.25
 日期：2026-06-22
 功能：多用户押注、结算、命令处理
 更新：新增 edb 额外长龙下注开关
@@ -1946,7 +1946,7 @@ def _build_help_card() -> str:
         "• <code>/wlc [n]</code> 连输相关阈值\n\n"
         "<b>开关控制</b>\n"
         "• <code>/mfb [on/off]</code> 模型兜底开关（模型不可用时是否统计兜底下注）\n"
-        "• <code>/edb [on/off]</code> 额外长龙下注开关（长龙/交替时是否额外加注 200 万）\n\n"
+        "• <code>/edb [on/off]</code> 额外长龙下注开关（长龙/交替时是否额外加注 100 万）\n\n"
         "<b>📊 数据管理</b>\n"
         "• <code>/res tj</code> 重置统计数据（收益、胜率、计数）\n"
         "• <code>/res state</code> 重置状态（包括大路历史）\n"
@@ -4451,7 +4451,7 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
         "result": None,
         "profit": 0,
         "lose_stop": rt.get("lose_stop", 13),
-        "profit_target": rt.get("profit", 2000000)
+        "profit_target": rt.get("profit", 1000000)
     })
     _clear_hand_stall_guard(rt)
 
@@ -4818,11 +4818,11 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
 def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
     """
     特殊形态额外加注：
-    - 5 连以上长龙：额外加 2000000
-    - 6 位纯交替：额外加 2000000
+    - 5 连以上长龙：额外加 1000000
+    - 6 位纯交替：额外加 1000000
     
     触发条件：
-    - 检测到形态即加注 200 万（无论 lose_count 是多少）
+    - 检测到形态即加注 100 万（无论 lose_count 是多少）
     - 额外加注不中后：lose_count 重置，下手机重新检测
     """
     if history is None:
@@ -4847,7 +4847,7 @@ def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
             rt["dragon_tail_streak"] = 6
             log_event(logging.INFO, 'bet_on', '交替额外加注', user_id=0,
                       data=f"seq={last_6}, history={''.join(str(x) for x in history[-10:])}")
-            return 2000000
+            return 1000000
     
     # 检查长龙（5 连以上）
     streak, tail_side = _get_history_tail_streak(history)
@@ -4856,7 +4856,7 @@ def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
         rt["dragon_tail_streak"] = streak
         log_event(logging.INFO, 'bet_on', '长龙额外加注', user_id=0,
                   data=f"streak={streak}, side={tail_side}, history={''.join(str(x) for x in history[-10:])}")
-        return 2000000
+        return 1000000
     
     rt["dragon_has_bet"] = False
     return 0
@@ -5847,7 +5847,7 @@ async def _handle_goal_pause_after_settle(
     explode = int(rt.get("explode", 5))
     # 盈利达成暂停已取消，不再检查 period_profit >= profit_target
     period_profit = int(rt.get("period_profit", 0))
-    profit_target = int(rt.get("profit", 2000000))
+    profit_target = int(rt.get("profit", 1000000))
 
     # 仅检查炸号保护
     if not (explode_count >= explode):
@@ -7177,7 +7177,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 
                 direction_label = {"same": "同向", "reverse": "反向", "auto": "跟随策略"}.get(bet_direction, bet_direction)
                 
-                extra_line = "• 额外加注：触发长龙或交替形态时 +200 万\n" if rt.get("extra_dragon_bet_enabled", True) else "• 额外加注：已关闭\n"
+                extra_line = "• 额外加注：触发长龙或交替形态时 +100 万\n" if rt.get("extra_dragon_bet_enabled", True) else "• 额外加注：已关闭\n"
 
                 mes = (
                     f"<b>预设启动成功：{preset_name}</b>\n\n"
@@ -7214,7 +7214,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
             
             preset_name = rt.get("current_preset_name", "")
             
-            extra_line = "• 额外加注：触发长龙或交替形态时 +200 万" if rt.get("extra_dragon_bet_enabled", True) else "• 额外加注：已关闭"
+            extra_line = "• 额外加注：触发长龙或交替形态时 +100 万" if rt.get("extra_dragon_bet_enabled", True) else "• 额外加注：已关闭"
 
             mes = (
                 f"<b>已切换到交替模式</b>\n\n"
@@ -7318,7 +7318,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                     mes = _build_ops_card(
                         "❌ 菠菜资金设置失败",
                         summary="金额格式无效，必须是整数。",
-                        action="请执行 `gf [金额]`，例如 `gf 2000000`。",
+                        action="请执行 `gf [金额]`，例如 `gf 1000000`。",
                     )
             else:
                 mes = _build_ops_card(
@@ -7463,7 +7463,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
             if len(my) == 1:
                 state_text = "开启" if current_enabled else "关闭"
                 action_text = (
-                    "长龙 5 连或交替 6 位时额外加注 200 万"
+                    "长龙 5 连或交替 6 位时额外加注 100 万"
                     if current_enabled
                     else "长龙/交替形态不触发额外加注"
                 )
@@ -7482,7 +7482,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                     mes = _build_ops_card(
                         f"额外长龙下注已{'开启' if enabled else '关闭'}",
                         summary=(
-                            "长龙 5 连或交替 6 位时额外加注 200 万"
+                            "长龙 5 连或交替 6 位时额外加注 100 万"
                             if enabled
                             else "长龙/交替形态不再触发额外加注"
                         ),
@@ -7882,7 +7882,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                         f"初始金额：{_format_money_message(base)}\n"
                         
                         f"押注倍率：{multipliers[0]} / {multipliers[1]} / {multipliers[2]} / {multipliers[3]}\n"
-                        + (f"额外加注：长龙 5 连或交替 6 位时 +200 万\n" if rt.get("extra_dragon_bet_enabled", True) else f"额外加注：已关闭\n") +
+                        + (f"额外加注：长龙 5 连或交替 6 位时 +100 万\n" if rt.get("extra_dragon_bet_enabled", True) else f"额外加注：已关闭\n") +
                         f"\n"
                         f"💡 说明\n"
                         f"• 第 1 手为首注，第 2 手起基于前一手金额连续倍投\n"
@@ -7977,14 +7977,14 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                     for name, params in sorted(presets.items()):
                         base_amount = int(params[6])
                         dragon_enabled = rt.get("extra_dragon_bet_enabled", True)
-                        extra_amount = 2000000 if dragon_enabled else 0
+                        extra_amount = 1000000 if dragon_enabled else 0
                         max_amount = base_amount + extra_amount
-                        extra_text = " (含额外 200 万)" if dragon_enabled else ""
+                        extra_text = " (含额外 100 万)" if dragon_enabled else ""
                         line = f"<code>{name:6}</code> → 基础：{_format_money_message(base_amount):>10} | 最高：{_format_money_message(max_amount):>12}{extra_text}"
                         lines.append(line)
                     
                     preset_table = "\n".join(lines)
-                    extra_desc = "• 最高金额：触发长龙 5 连或交替 5 位时的总下注（基础 +200 万）" if rt.get("extra_dragon_bet_enabled", True) else "• 最高金额：与基础金额相同（额外加注已关闭）"
+                    extra_desc = "• 最高金额：触发长龙 5 连或交替 5 位时的总下注（基础 +100 万）" if rt.get("extra_dragon_bet_enabled", True) else "• 最高金额：与基础金额相同（额外加注已关闭）"
                     mes = (
                         "<b>预设下注金额一览</b>\n\n"
                         f"{preset_table}\n\n"
