@@ -685,6 +685,10 @@ def _apply_inferred_settle_from_history(state: UserState, rt: Dict[str, Any], op
         rt["bet_amount"] = int(rt.get("initial_amount", 500))
         rt["_bet_base"] = int(rt.get("initial_amount", 500))
 
+    saved_bet_base = rt.get("_bet_base", 0)
+    old_next = int(calculate_bet_amount(rt) or 0)
+    rt["_bet_base"] = saved_bet_base
+
     return {
         "win": win,
         "result_text": result_text,
@@ -692,7 +696,7 @@ def _apply_inferred_settle_from_history(state: UserState, rt: Dict[str, Any], op
         "bet_amount": bet_amount,
         "sequence_after": int(rt.get("bet_sequence_count", 0) or 0),
         "lose_count_after": int(rt.get("lose_count", 0) or 0),
-        "next_bet_amount": int(calculate_bet_amount(rt) or 0),
+        "next_bet_amount": old_next,
     }
 
 
@@ -4791,9 +4795,13 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
 
     dragon_extra = _get_dragon_extra_bet_amount(rt, history)
 
+    # 只有传入 history 的真实下注调用才更新 _bet_base，diag/显示调用不污染
+    is_live = history is not None
+
     if win_count >= 0 and lose_count == 0:
         base = constants.closest_multiple_of_500(initial_amount)
-        rt["_bet_base"] = base
+        if is_live:
+            rt["_bet_base"] = base
         return base + dragon_extra
 
     if (lose_count + 1) > lose_stop:
@@ -4802,7 +4810,8 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
     # 固定金额模式：不倍投，始终返回初始金额
     if is_fixed_bet:
         base = constants.closest_multiple_of_500(initial_amount)
-        rt["_bet_base"] = base
+        if is_live:
+            rt["_bet_base"] = base
         return base + dragon_extra
 
     # 累积倍投：基于 _bet_base 继续倍投（不含龙额外加注）
@@ -4818,7 +4827,8 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
 
     # 与 master 一致：补 1% 安全边际
     base = constants.closest_multiple_of_500(target + target * 0.01)
-    rt["_bet_base"] = base
+    if is_live:
+        rt["_bet_base"] = base
     return base + dragon_extra
 
 
@@ -6417,6 +6427,9 @@ async def _process_settle_slim(client, event, user_ctx: UserContext, global_conf
                     rt["bet_amount"] = int(active_chain_summary.get("last_amount", bet_amount) or bet_amount)
 
             if _verbose_runtime_diag_enabled():
+                saved_bet_base = rt.get("_bet_base", 0)
+                next_diag = int(calculate_bet_amount(rt) or 0)
+                rt["_bet_base"] = saved_bet_base
                 log_event(
                     logging.INFO,
                     'settle',
@@ -6432,7 +6445,7 @@ async def _process_settle_slim(client, event, user_ctx: UserContext, global_conf
                         settle_profit=profit,
                         chain_sequence_after=int(rt.get("bet_sequence_count", 0) or 0),
                         chain_lose_after=int(rt.get("lose_count", 0) or 0),
-                        next_bet_amount=int(calculate_bet_amount(rt) or 0),
+                        next_bet_amount=next_diag,
                     ),
                 )
 
