@@ -661,7 +661,6 @@ def _apply_inferred_settle_from_history(state: UserState, rt: Dict[str, Any], op
         # 长龙额外加注不中后，重置为初始金额重新开始
         if rt.get("dragon_has_bet", False):
             rt["bet_amount"] = int(rt.get("initial_amount", 500))
-            rt["_bet_base"] = int(rt.get("initial_amount", 500))
             rt["lose_count"] = 0  # 重置连输计数，下一手按初始金额下注
             rt["dragon_has_bet"] = False
             rt["dragon_tail_streak"] = 0
@@ -683,7 +682,6 @@ def _apply_inferred_settle_from_history(state: UserState, rt: Dict[str, Any], op
     if win or rt.get("lose_count", 0) >= rt.get("lose_stop", 13):
         rt["bet_sequence_count"] = 0
         rt["bet_amount"] = int(rt.get("initial_amount", 500))
-        rt["_bet_base"] = int(rt.get("initial_amount", 500))
 
     return {
         "win": win,
@@ -4453,7 +4451,7 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
         "result": None,
         "profit": 0,
         "lose_stop": rt.get("lose_stop", 13),
-        "profit_target": rt.get("profit", 1000000)
+        "profit_target": rt.get("profit", 2000000)
     })
     _clear_hand_stall_guard(rt)
 
@@ -4792,7 +4790,6 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
 
     if win_count >= 0 and lose_count == 0:
         base = constants.closest_multiple_of_500(initial_amount)
-        rt["_bet_base"] = base
         return base + dragon_extra
 
     if (lose_count + 1) > lose_stop:
@@ -4800,12 +4797,10 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
 
     # 固定金额模式：不倍投，始终返回初始金额
     if is_fixed_bet:
-        base = constants.closest_multiple_of_500(initial_amount)
-        rt["_bet_base"] = base
-        return base + dragon_extra
+        return constants.closest_multiple_of_500(initial_amount) + dragon_extra
 
-    # 累积倍投：基于 _bet_base 继续倍投（不含龙额外加注，避免 200 万倍投放大）
-    base_amount = int(rt.get("_bet_base", initial_amount))
+    # 累积倍投：基于上一手 bet_amount 继续倍投
+    base_amount = int(rt.get("bet_amount", initial_amount))
     if lose_count == 1:
         target = base_amount * lose_once
     elif lose_count == 2:
@@ -4817,7 +4812,6 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
 
     # 与 master 一致：补 1% 安全边际
     base = constants.closest_multiple_of_500(target + target * 0.01)
-    rt["_bet_base"] = base
     return base + dragon_extra
 
 
@@ -5853,7 +5847,7 @@ async def _handle_goal_pause_after_settle(
     explode = int(rt.get("explode", 5))
     # 盈利达成暂停已取消，不再检查 period_profit >= profit_target
     period_profit = int(rt.get("period_profit", 0))
-    profit_target = int(rt.get("profit", 1000000))
+    profit_target = int(rt.get("profit", 2000000))
 
     # 仅检查炸号保护
     if not (explode_count >= explode):
@@ -6407,7 +6401,6 @@ async def _process_settle_slim(client, event, user_ctx: UserContext, global_conf
                 # 长龙额外加注不中后，重置为初始金额重新开始
                 if rt.get("dragon_has_bet", False):
                     rt["bet_amount"] = int(rt.get("initial_amount", 500))
-                    rt["_bet_base"] = int(rt.get("initial_amount", 500))
                     rt["lose_count"] = 0  # 重置连输计数，下一手按初始金额下注
                     rt["dragon_has_bet"] = False
                     rt["dragon_tail_streak"] = 0
@@ -6532,7 +6525,6 @@ async def _process_settle_slim(client, event, user_ctx: UserContext, global_conf
             if win or rt.get("lose_count", 0) >= rt.get("lose_stop", 13):
                 rt["bet_sequence_count"] = 0
                 rt["bet_amount"] = int(rt.get("initial_amount", 500))
-                rt["_bet_base"] = int(rt.get("initial_amount", 500))
 
         await _apply_settle_fund_safety_guard()
 
@@ -7165,10 +7157,6 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 rt["initial_amount"] = int(preset[6])
                 rt["current_preset_name"] = preset_name
                 rt["bet_amount"] = int(preset[6])
-                rt["lose_count"] = 0
-                rt["win_count"] = 0
-                rt["bet_sequence_count"] = 0
-                rt["_bet_base"] = int(preset[6])
                 # 读取方向参数（第 8 个参数，可选）
                 bet_direction = preset[7] if len(preset) > 7 else "auto"
                 rt["bet_direction"] = bet_direction
@@ -7330,7 +7318,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                     mes = _build_ops_card(
                         "❌ 菠菜资金设置失败",
                         summary="金额格式无效，必须是整数。",
-                        action="请执行 `gf [金额]`，例如 `gf 1000000`。",
+                        action="请执行 `gf [金额]`，例如 `gf 2000000`。",
                     )
             else:
                 mes = _build_ops_card(
