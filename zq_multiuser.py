@@ -1,6 +1,6 @@
 """
 zq_multiuser.py - 多用户版本核心逻辑
-版本：1.0.26
+版本：1.0.27
 日期：2026-06-22
 功能：多用户押注、结算、命令处理
 更新：新增 edb 额外长龙下注开关
@@ -4251,78 +4251,82 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
         rt["last_predict_reason"] = f"强制延续下注 (剩余 {forced_remaining} 次)"
         log_event(logging.INFO, 'bet_on', '强制延续', user_id=user_ctx.user_id,
                   data=f"direction={prediction}, remaining={forced_remaining}")
-    # 优先级 0.5: 固定数据规律检测（长龙/交替优先于模式）
+    # 优先级 0.5: 固定数据规律检测（长龙/交替优先于模式，edb on 时生效）
     elif True:
-        fixed_signal = _detect_fixed_pattern_signal(history)
-        if fixed_signal.get("active"):
-            prediction = fixed_signal["prediction"]
-            follow = fixed_signal.get("follow_pattern", "")
-            seq = fixed_signal.get("detected_seq", "")
-            label = fixed_signal.get("label", "固定规律")
-            duration = fixed_signal.get("duration", 1)
-            
-            if duration > 1:
-                rt["forced_bet_remaining"] = duration - 1
-                rt["forced_bet_direction"] = prediction
-                direction_text = "反向" if follow == "reverse" else "同向"
-                reason = f"检测到{label}（{seq}），后续 {duration} 次{direction_text}下注{'大' if prediction == 1 else '小'}"
-            elif follow == "reverse":
-                reason = f"检测到{label}（{seq}），反向下注{'大' if prediction == 1 else '小'}"
-            elif follow == "same":
-                reason = f"检测到{label}（{seq}），同向下注{'大' if prediction == 1 else '小'}"
-            else:
-                reason = f"检测到{label}（{seq}），按照规律下注{'大' if prediction == 1 else '小'}"
-            
-            rt["last_predict_source"] = "fixed_pattern"
-            rt["last_predict_tag"] = "FIXED_PATTERN"
-            rt["last_predict_confidence"] = 100
-            rt["last_predict_reason"] = reason
-            log_event(logging.INFO, 'bet_on', '固定规律', user_id=user_ctx.user_id,
-                      data=f"seq={seq}, follow={follow}, prediction={prediction}")
-        # 无固定形态时，应用预设模式
-        elif rt.get("bet_direction") in ("0", "1", "same", "reverse") and history:
-            bet_direction = rt.get("bet_direction")
-            if bet_direction in ("0", "1"):
-                # 固定方向：0=永远下小，1=永远下大
-                prediction = int(bet_direction)
-                direction_text = "小" if prediction == 0 else "大"
-                rt["last_predict_source"] = "preset_fixed_direction"
-                rt["last_predict_tag"] = f"FIXED_{prediction}"
+        fixed_active = False
+        if rt.get("extra_dragon_bet_enabled", True):
+            fixed_signal = _detect_fixed_pattern_signal(history)
+            if fixed_signal.get("active"):
+                fixed_active = True
+                prediction = fixed_signal["prediction"]
+                follow = fixed_signal.get("follow_pattern", "")
+                seq = fixed_signal.get("detected_seq", "")
+                label = fixed_signal.get("label", "固定规律")
+                duration = fixed_signal.get("duration", 1)
+                
+                if duration > 1:
+                    rt["forced_bet_remaining"] = duration - 1
+                    rt["forced_bet_direction"] = prediction
+                    direction_text = "反向" if follow == "reverse" else "同向"
+                    reason = f"检测到{label}（{seq}），后续 {duration} 次{direction_text}下注{'大' if prediction == 1 else '小'}"
+                elif follow == "reverse":
+                    reason = f"检测到{label}（{seq}），反向下注{'大' if prediction == 1 else '小'}"
+                elif follow == "same":
+                    reason = f"检测到{label}（{seq}），同向下注{'大' if prediction == 1 else '小'}"
+                else:
+                    reason = f"检测到{label}（{seq}），按照规律下注{'大' if prediction == 1 else '小'}"
+                
+                rt["last_predict_source"] = "fixed_pattern"
+                rt["last_predict_tag"] = "FIXED_PATTERN"
                 rt["last_predict_confidence"] = 100
-                rt["last_predict_reason"] = f"预设固定方向：永远下{direction_text}"
-                log_event(logging.INFO, 'bet_on', '固定方向', user_id=user_ctx.user_id,
-                          data=f"bet_direction={bet_direction}, prediction={prediction}")
-            elif bet_direction == "same":
-                # 同向：跟随上一手
+                rt["last_predict_reason"] = reason
+                log_event(logging.INFO, 'bet_on', '固定规律', user_id=user_ctx.user_id,
+                          data=f"seq={seq}, follow={follow}, prediction={prediction}")
+        # edb 关闭时跳过固定规律，直接按预设方向或跟随上一手
+        if not fixed_active:
+            if rt.get("bet_direction") in ("0", "1", "same", "reverse") and history:
+                bet_direction = rt.get("bet_direction")
+                if bet_direction in ("0", "1"):
+                    # 固定方向：0=永远下小，1=永远下大
+                    prediction = int(bet_direction)
+                    direction_text = "小" if prediction == 0 else "大"
+                    rt["last_predict_source"] = "preset_fixed_direction"
+                    rt["last_predict_tag"] = f"FIXED_{prediction}"
+                    rt["last_predict_confidence"] = 100
+                    rt["last_predict_reason"] = f"预设固定方向：永远下{direction_text}"
+                    log_event(logging.INFO, 'bet_on', '固定方向', user_id=user_ctx.user_id,
+                              data=f"bet_direction={bet_direction}, prediction={prediction}")
+                elif bet_direction == "same":
+                    # 同向：跟随上一手
+                    prediction = history[-1]
+                    rt["last_predict_source"] = "preset_same_direction"
+                    rt["last_predict_tag"] = "PRESET_SAME"
+                    rt["last_predict_confidence"] = 100
+                    rt["last_predict_reason"] = f"预设同向下注：跟随上一手{'大' if prediction == 1 else '小'}"
+                    log_event(logging.INFO, 'bet_on', '预设方向', user_id=user_ctx.user_id,
+                              data=f"bet_direction={bet_direction}, prediction={prediction}")
+                else:  # reverse
+                    # 反向：与上一手相反
+                    prediction = 1 - history[-1]
+                    rt["last_predict_source"] = "preset_reverse_direction"
+                    rt["last_predict_tag"] = "PRESET_REVERSE"
+                    rt["last_predict_confidence"] = 100
+                    rt["last_predict_reason"] = f"预设反向下注：与上一手相反{'大' if prediction == 1 else '小'}"
+                    log_event(logging.INFO, 'bet_on', '预设方向', user_id=user_ctx.user_id,
+                              data=f"bet_direction={bet_direction}, prediction={prediction}")
+            elif len(history) > 0:
+                # 无预设模式时，默认跟随上一手
                 prediction = history[-1]
-                rt["last_predict_source"] = "preset_same_direction"
-                rt["last_predict_tag"] = "PRESET_SAME"
-                rt["last_predict_confidence"] = 100
-                rt["last_predict_reason"] = f"预设同向下注：跟随上一手{'大' if prediction == 1 else '小'}"
-                log_event(logging.INFO, 'bet_on', '预设方向', user_id=user_ctx.user_id,
-                          data=f"bet_direction={bet_direction}, prediction={prediction}")
-            else:  # reverse
-                # 反向：与上一手相反
-                prediction = 1 - history[-1]
-                rt["last_predict_source"] = "preset_reverse_direction"
-                rt["last_predict_tag"] = "PRESET_REVERSE"
-                rt["last_predict_confidence"] = 100
-                rt["last_predict_reason"] = f"预设反向下注：与上一手相反{'大' if prediction == 1 else '小'}"
-                log_event(logging.INFO, 'bet_on', '预设方向', user_id=user_ctx.user_id,
-                          data=f"bet_direction={bet_direction}, prediction={prediction}")
-        elif len(history) > 0:
-            # 无预设模式时，默认跟随上一手
-            prediction = history[-1]
-            rt["last_predict_source"] = "follow_last"
-            rt["last_predict_tag"] = "FOLLOW_TREND"
-            rt["last_predict_confidence"] = 80
-            rt["last_predict_reason"] = f"跟随上一手{history[-1]}，下{'大' if prediction == 1 else '小'}"
-        else:
-            prediction = 1
-            rt["last_predict_source"] = "default"
-            rt["last_predict_tag"] = "DEFAULT"
-            rt["last_predict_confidence"] = 50
-            rt["last_predict_reason"] = "无历史数据，默认下大"
+                rt["last_predict_source"] = "follow_last"
+                rt["last_predict_tag"] = "FOLLOW_TREND"
+                rt["last_predict_confidence"] = 80
+                rt["last_predict_reason"] = f"跟随上一手{history[-1]}，下{'大' if prediction == 1 else '小'}"
+            else:
+                prediction = 1
+                rt["last_predict_source"] = "default"
+                rt["last_predict_tag"] = "DEFAULT"
+                rt["last_predict_confidence"] = 50
+                rt["last_predict_reason"] = "无历史数据，默认下大"
     
     rt["last_predict_info"] = f"预测方向：{'大' if prediction == 1 else '小'} - {rt['last_predict_reason']}"
     log_event(logging.INFO, 'bet_on', '最终预测', user_id=user_ctx.user_id, 
