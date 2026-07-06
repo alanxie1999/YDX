@@ -295,10 +295,10 @@ HIGH_STEP_DOUBLE_CONFIRM_MODEL_TIMEOUT_SEC = 5.0
 
 # 固定数据规律：检测到特定序列后，按照规律下注
 FIXED_PATTERNS = {
-    "010101": {"follow": "reverse", "label": "6 位交替"},
-    "101010": {"follow": "reverse", "label": "6 位交替"},
-    "11111": {"follow": "1", "label": "5 连长龙"},
-    "00000": {"follow": "0", "label": "5 连长龙"},
+    "010101010": {"follow": "reverse", "label": "9 位交替"},
+    "101010101": {"follow": "reverse", "label": "9 位交替"},
+    "111111111": {"follow": "1", "label": "9 连长龙"},
+    "000000000": {"follow": "0", "label": "9 连长龙"},
 }
 
 # 同手位防卡死：避免 SKIP/超时导致长期不落单
@@ -2934,7 +2934,7 @@ def _detect_fixed_pattern_signal(
     history: list,
 ) -> Dict[str, Any]:
     """识别固定数据序列信号，并给出相应的下注方向。支持不同长度的模式。"""
-    if not isinstance(history, list) or len(history) < 5:
+    if not isinstance(history, list) or len(history) < 9:
         return {"active": False}
 
     history_str = "".join(str(x) for x in history)
