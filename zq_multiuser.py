@@ -1,6 +1,6 @@
 """
 zq_multiuser.py - 多用户版本核心逻辑
-版本：1.0.32
+版本：1.0.33
 日期：2026-07-06
 功能：多用户押注、结算、命令处理
 更新：长龙/交替第九手额外加注 300 万
@@ -4142,52 +4142,26 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
 
     bet_amount = calculate_bet_amount(rt, state.history)
     if bet_amount <= 0:
+        # 达到连投上限：重置计数，从首注重新开始（不暂停）
+        lose_count = int(rt.get("lose_count", 0))
         lose_stop = int(rt.get("lose_stop", 13))
-        if not rt.get("limit_stop_notified", False):
-            lose_count = int(rt.get("lose_count", 0))
-            mes = (
-                "⚠️ 已达到预设连投上限，已自动暂停\n"
-                f"当前预设最多连投：{lose_stop} 手\n"
-                f"当前连输：{lose_count} 手\n"
-                "等待 10 局后将用首注金额重新开始"
-            )
-            await send_to_admin(client, mes, user_ctx, global_config)
-            rt["limit_stop_notified"] = True
-            
-            # 设置暂停 10 局，并从首注重新开始
-            rt["stop_count"] = 10
-            rt["bet_sequence_count"] = 0
-            rt["bet_amount"] = int(rt.get("initial_amount", 500))
-            rt["_bet_base"] = int(rt.get("initial_amount", 500))
-            rt["lose_count"] = 0
-            rt["win_count"] = 0
-            rt["earnings"] = rt.get("earnings", 0)  # 移除 profit 引用
-            
-            _enter_pause(rt, 10, "连输止损暂停，10 局后重置首注")
-            log_event(
-                logging.INFO,
-                'bet_on',
-                '连输止损已暂停，10 局后重置',
-                user_id=user_ctx.user_id,
-                data=f"lose_count={lose_count}, 将在 10 局后用首注 {int(rt.get('initial_amount', 500))} 重新开始"
-            )
-        
+        initial_amount = int(rt.get("initial_amount", 500))
+        rt["bet_sequence_count"] = 0
+        rt["bet_amount"] = initial_amount
+        rt["_bet_base"] = initial_amount
+        rt["lose_count"] = 0
+        rt["win_count"] = 0
+        rt["earnings"] = rt.get("earnings", 0)
+        bet_amount = calculate_bet_amount(rt, state.history)
         log_event(
-            logging.WARNING,
+            logging.INFO,
             'bet_on',
-            '达到连投上限，停止下注',
+            '达到连投上限，重置计数继续下注',
             user_id=user_ctx.user_id,
-            category='warning',
+            data=f"lose_count={lose_count}, 从首注 {initial_amount} 重新开始",
             **_build_runtime_chain_diag(rt, state, lose_stop=lose_stop, next_bet_amount=bet_amount),
         )
-        rt["bet"] = False
-        rt["bet_on"] = False
-        rt["mode_stop"] = True
-        _clear_lose_recovery_tracking(rt)
-        user_ctx.save_state()
-        return
-    rt["limit_stop_notified"] = False
-
+    
     if not is_fund_available(user_ctx, bet_amount):
         if not rt.get("fund_pause_notified", False):
             display_fund = max(0, rt.get("gambling_fund", 0))
@@ -4452,7 +4426,6 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
     rt["bet_type"] = 1 if prediction == 1 else 0
     rt["bet_on"] = True
     rt["fund_pause_notified"] = False
-    rt["limit_stop_notified"] = False
 
     bet_id = generate_bet_id(user_ctx)
     _append_bet_sequence_entry(state, {
@@ -7203,7 +7176,6 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 rt["bet"] = False  # st 命令不直接设置 bet=True，等待真实盘口触发下注
                 rt["risk_deep_triggered_milestones"] = []
                 rt["fund_pause_notified"] = False
-                rt["limit_stop_notified"] = False
                 _clear_lose_recovery_tracking(rt)
                 user_ctx.save_state()
                 
@@ -8226,28 +8198,30 @@ async def check_bet_status(client, user_ctx: UserContext, global_config: dict):
         return
     next_bet_amount = calculate_bet_amount(rt)
     if next_bet_amount <= 0:
-        rt["bet"] = False
-        rt["bet_on"] = False
-        rt["mode_stop"] = True
-        _clear_lose_recovery_tracking(rt)
-        if not rt.get("limit_stop_notified", False):
-            lose_stop = int(rt.get("lose_stop", 13))
-            await send_to_admin(
-                client,
-                _build_alert_ops_card(
-                    "⚠️ 已达到预设连投上限",
-                    impact="当前链路已经到达设定的最大连投次数，系统将保持暂停。",
-                    fields=[("当前上限", f"{lose_stop} 手")],
-                    action="如需继续，可切换预设，或执行 `res bet` 后重新启动。",
-                ),
-                user_ctx,
-                global_config,
-            )
-            rt["limit_stop_notified"] = True
+        # 达到连投上限：重置计数，从首注重新开始（不暂停）
+        lose_stop = int(rt.get("lose_stop", 13))
+        initial_amount = int(rt.get("initial_amount", 500))
+        rt["bet_sequence_count"] = 0
+        rt["bet_amount"] = initial_amount
+        rt["_bet_base"] = initial_amount
+        rt["lose_count"] = 0
+        rt["win_count"] = 0
+        rt["earnings"] = rt.get("earnings", 0)
+        next_bet_amount = calculate_bet_amount(rt)
+        await send_to_admin(
+            client,
+            _build_alert_ops_card(
+                "达到预设连投上限，已重置",
+                impact=f"连输达到上限，计数已重置，从首注 {initial_amount} 重新开始。",
+                fields=[("当前上限", f"{lose_stop} 手")],
+                action="如需调整上限，可修改预设参数。",
+            ),
+            user_ctx,
+            global_config,
+        )
         user_ctx.save_state()
         return
 
-    rt["limit_stop_notified"] = False
     if is_fund_available(user_ctx, next_bet_amount) and not rt.get("bet", False) and rt.get("switch", True) and rt.get("stop_count", 0) == 0:
         await _clear_pause_countdown_notice(client, user_ctx)
         # 这里只恢复“可下注状态”，不应提前标记为“已下注”。
