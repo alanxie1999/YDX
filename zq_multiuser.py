@@ -1,9 +1,9 @@
 """
 zq_multiuser.py - 多用户版本核心逻辑
-版本：1.0.33
+版本：1.0.34
 日期：2026-07-06
 功能：多用户押注、结算、命令处理
-更新：长龙/交替第九手额外加注 300 万
+更新：额外长龙加注从 200 万调整为 100 万
 """
 
 import logging
@@ -295,10 +295,10 @@ HIGH_STEP_DOUBLE_CONFIRM_MODEL_TIMEOUT_SEC = 5.0
 
 # 固定数据规律：检测到特定序列后，按照规律下注
 FIXED_PATTERNS = {
-    "010101010": {"follow": "reverse", "label": "9 位交替"},
-    "101010101": {"follow": "reverse", "label": "9 位交替"},
-    "111111111": {"follow": "1", "label": "9 连长龙"},
-    "000000000": {"follow": "0", "label": "9 连长龙"},
+    "01010": {"follow": "reverse", "label": "5 位交替"},
+    "10101": {"follow": "reverse", "label": "5 位交替"},
+    "11111": {"follow": "1", "label": "5 连长龙"},
+    "00000": {"follow": "0", "label": "5 连长龙"},
 }
 
 # 同手位防卡死：避免 SKIP/超时导致长期不落单
@@ -1953,7 +1953,7 @@ def _build_help_card() -> str:
         "• <code>/wlc [n]</code> 连输相关阈值\n\n"
         "<b>开关控制</b>\n"
         "• <code>/mfb [on/off]</code> 模型兜底开关（模型不可用时是否统计兜底下注）\n"
-        "• <code>/edb [on/off]</code> 额外长龙下注开关（长龙/交替时是否额外加注 300 万）\n\n"
+        "• <code>/edb [on/off]</code> 额外长龙下注开关（长龙/交替时是否额外加注 100 万）\n\n"
         "<b>📊 数据管理</b>\n"
         "• <code>/res tj</code> 重置统计数据（收益、胜率、计数）\n"
         "• <code>/res state</code> 重置状态（包括大路历史）\n"
@@ -2934,7 +2934,7 @@ def _detect_fixed_pattern_signal(
     history: list,
 ) -> Dict[str, Any]:
     """识别固定数据序列信号，并给出相应的下注方向。支持不同长度的模式。"""
-    if not isinstance(history, list) or len(history) < 9:
+    if not isinstance(history, list) or len(history) < 5:
         return {"active": False}
 
     history_str = "".join(str(x) for x in history)
@@ -4142,26 +4142,52 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
 
     bet_amount = calculate_bet_amount(rt, state.history)
     if bet_amount <= 0:
-        # 达到连投上限：重置计数，从首注重新开始（不暂停）
-        lose_count = int(rt.get("lose_count", 0))
         lose_stop = int(rt.get("lose_stop", 13))
-        initial_amount = int(rt.get("initial_amount", 500))
-        rt["bet_sequence_count"] = 0
-        rt["bet_amount"] = initial_amount
-        rt["_bet_base"] = initial_amount
-        rt["lose_count"] = 0
-        rt["win_count"] = 0
-        rt["earnings"] = rt.get("earnings", 0)
-        bet_amount = calculate_bet_amount(rt, state.history)
+        if not rt.get("limit_stop_notified", False):
+            lose_count = int(rt.get("lose_count", 0))
+            mes = (
+                "⚠️ 已达到预设连投上限，已自动暂停\n"
+                f"当前预设最多连投：{lose_stop} 手\n"
+                f"当前连输：{lose_count} 手\n"
+                "等待 10 局后将用首注金额重新开始"
+            )
+            await send_to_admin(client, mes, user_ctx, global_config)
+            rt["limit_stop_notified"] = True
+            
+            # 设置暂停 10 局，并从首注重新开始
+            rt["stop_count"] = 10
+            rt["bet_sequence_count"] = 0
+            rt["bet_amount"] = int(rt.get("initial_amount", 500))
+            rt["_bet_base"] = int(rt.get("initial_amount", 500))
+            rt["lose_count"] = 0
+            rt["win_count"] = 0
+            rt["earnings"] = rt.get("earnings", 0)  # 移除 profit 引用
+            
+            _enter_pause(rt, 10, "连输止损暂停，10 局后重置首注")
+            log_event(
+                logging.INFO,
+                'bet_on',
+                '连输止损已暂停，10 局后重置',
+                user_id=user_ctx.user_id,
+                data=f"lose_count={lose_count}, 将在 10 局后用首注 {int(rt.get('initial_amount', 500))} 重新开始"
+            )
+        
         log_event(
-            logging.INFO,
+            logging.WARNING,
             'bet_on',
-            '达到连投上限，重置计数继续下注',
+            '达到连投上限，停止下注',
             user_id=user_ctx.user_id,
-            data=f"lose_count={lose_count}, 从首注 {initial_amount} 重新开始",
+            category='warning',
             **_build_runtime_chain_diag(rt, state, lose_stop=lose_stop, next_bet_amount=bet_amount),
         )
-    
+        rt["bet"] = False
+        rt["bet_on"] = False
+        rt["mode_stop"] = True
+        _clear_lose_recovery_tracking(rt)
+        user_ctx.save_state()
+        return
+    rt["limit_stop_notified"] = False
+
     if not is_fund_available(user_ctx, bet_amount):
         if not rt.get("fund_pause_notified", False):
             display_fund = max(0, rt.get("gambling_fund", 0))
@@ -4426,6 +4452,7 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
     rt["bet_type"] = 1 if prediction == 1 else 0
     rt["bet_on"] = True
     rt["fund_pause_notified"] = False
+    rt["limit_stop_notified"] = False
 
     bet_id = generate_bet_id(user_ctx)
     _append_bet_sequence_entry(state, {
@@ -4813,11 +4840,11 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
 def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
     """
     特殊形态额外加注：
-    - 9 连以上长龙：额外加 3000000
-    - 9 位纯交替：额外加 3000000
+    - 5 连以上长龙：额外加 1000000
+    - 5 位纯交替：额外加 1000000
     
     触发条件：
-    - 检测到形态即加注 300 万（无论 lose_count 是多少）
+    - 检测到形态即加注 100 万（无论 lose_count 是多少）
     - 额外加注不中后：lose_count 重置，下手机重新检测
     """
     if history is None:
@@ -4831,27 +4858,27 @@ def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
         rt["dragon_has_bet"] = False
         return 0
 
-    if not isinstance(history, list) or len(history) < 9:
+    if not isinstance(history, list) or len(history) < 5:
         return 0
     
-    # 检查交替（9 位纯交替）
-    if len(history) >= 9:
-        last_9 = ''.join(str(x) for x in history[-9:])
-        if last_9 in ('010101010', '101010101'):
+    # 检查交替（5 位纯交替）
+    if len(history) >= 5:
+        last_5 = ''.join(str(x) for x in history[-5:])
+        if last_5 in ('01010', '10101'):
             rt["dragon_has_bet"] = True  # 标记当前下注包含额外加注
-            rt["dragon_tail_streak"] = 9
+            rt["dragon_tail_streak"] = 5
             log_event(logging.INFO, 'bet_on', '交替额外加注', user_id=0,
-                      data=f"seq={last_9}, history={''.join(str(x) for x in history[-12:])}")
-            return 3000000
+                      data=f"seq={last_5}, history={''.join(str(x) for x in history[-10:])}")
+            return 1000000
     
-    # 检查长龙（9 连以上）
+    # 检查长龙（5 连以上）
     streak, tail_side = _get_history_tail_streak(history)
-    if streak >= 9:
+    if streak >= 5:
         rt["dragon_has_bet"] = True  # 标记当前下注包含额外加注
         rt["dragon_tail_streak"] = streak
         log_event(logging.INFO, 'bet_on', '长龙额外加注', user_id=0,
-                  data=f"streak={streak}, side={tail_side}, history={''.join(str(x) for x in history[-12:])}")
-        return 3000000
+                  data=f"streak={streak}, side={tail_side}, history={''.join(str(x) for x in history[-10:])}")
+        return 1000000
     
     rt["dragon_has_bet"] = False
     return 0
@@ -7176,12 +7203,13 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 rt["bet"] = False  # st 命令不直接设置 bet=True，等待真实盘口触发下注
                 rt["risk_deep_triggered_milestones"] = []
                 rt["fund_pause_notified"] = False
+                rt["limit_stop_notified"] = False
                 _clear_lose_recovery_tracking(rt)
                 user_ctx.save_state()
                 
                 direction_label = {"same": "同向", "reverse": "反向", "auto": "跟随策略"}.get(bet_direction, bet_direction)
                 
-                extra_line = "• 额外加注：触发长龙或交替形态时 +300 万\n" if rt.get("extra_dragon_bet_enabled", True) else "• 额外加注：已关闭\n"
+                extra_line = "• 额外加注：触发长龙或交替形态时 +100 万\n" if rt.get("extra_dragon_bet_enabled", True) else "• 额外加注：已关闭\n"
 
                 mes = (
                     f"<b>预设启动成功：{preset_name}</b>\n\n"
@@ -7218,7 +7246,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
             
             preset_name = rt.get("current_preset_name", "")
             
-            extra_line = "• 额外加注：触发长龙或交替形态时 +300 万" if rt.get("extra_dragon_bet_enabled", True) else "• 额外加注：已关闭"
+            extra_line = "• 额外加注：触发长龙或交替形态时 +100 万" if rt.get("extra_dragon_bet_enabled", True) else "• 额外加注：已关闭"
 
             mes = (
                 f"<b>已切换到交替模式</b>\n\n"
@@ -7467,7 +7495,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
             if len(my) == 1:
                 state_text = "开启" if current_enabled else "关闭"
                 action_text = (
-                    "长龙 9 连或交替 9 位时额外加注 300 万"
+                    "长龙 5 连或交替 5 位时额外加注 100 万"
                     if current_enabled
                     else "长龙/交替形态不触发额外加注"
                 )
@@ -7486,7 +7514,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                     mes = _build_ops_card(
                         f"额外长龙下注已{'开启' if enabled else '关闭'}",
                         summary=(
-                            "长龙 9 连或交替 9 位时额外加注 300 万"
+                            "长龙 5 连或交替 5 位时额外加注 100 万"
                             if enabled
                             else "长龙/交替形态不再触发额外加注"
                         ),
@@ -7886,7 +7914,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                         f"初始金额：{_format_money_message(base)}\n"
                         
                         f"押注倍率：{multipliers[0]} / {multipliers[1]} / {multipliers[2]} / {multipliers[3]}\n"
-                        + (f"额外加注：长龙 5 连或交替 6 位时 +300 万\n" if rt.get("extra_dragon_bet_enabled", True) else f"额外加注：已关闭\n") +
+                        + (f"额外加注：长龙 5 连或交替 5 位时 +100 万\n" if rt.get("extra_dragon_bet_enabled", True) else f"额外加注：已关闭\n") +
                         f"\n"
                         f"💡 说明\n"
                         f"• 第 1 手为首注，第 2 手起基于前一手金额连续倍投\n"
@@ -7983,12 +8011,12 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                         dragon_enabled = rt.get("extra_dragon_bet_enabled", True)
                         extra_amount = 1000000 if dragon_enabled else 0
                         max_amount = base_amount + extra_amount
-                        extra_text = " (含额外 300 万)" if dragon_enabled else ""
+                        extra_text = " (含额外 100 万)" if dragon_enabled else ""
                         line = f"<code>{name:6}</code> → 基础：{_format_money_message(base_amount):>10} | 最高：{_format_money_message(max_amount):>12}{extra_text}"
                         lines.append(line)
                     
                     preset_table = "\n".join(lines)
-                    extra_desc = "• 最高金额：触发长龙 5 连或交替 6 位时的总下注（基础 +300 万）" if rt.get("extra_dragon_bet_enabled", True) else "• 最高金额：与基础金额相同（额外加注已关闭）"
+                    extra_desc = "• 最高金额：触发长龙 5 连或交替 5 位时的总下注（基础 +100 万）" if rt.get("extra_dragon_bet_enabled", True) else "• 最高金额：与基础金额相同（额外加注已关闭）"
                     mes = (
                         "<b>预设下注金额一览</b>\n\n"
                         f"{preset_table}\n\n"
@@ -8198,30 +8226,28 @@ async def check_bet_status(client, user_ctx: UserContext, global_config: dict):
         return
     next_bet_amount = calculate_bet_amount(rt)
     if next_bet_amount <= 0:
-        # 达到连投上限：重置计数，从首注重新开始（不暂停）
-        lose_stop = int(rt.get("lose_stop", 13))
-        initial_amount = int(rt.get("initial_amount", 500))
-        rt["bet_sequence_count"] = 0
-        rt["bet_amount"] = initial_amount
-        rt["_bet_base"] = initial_amount
-        rt["lose_count"] = 0
-        rt["win_count"] = 0
-        rt["earnings"] = rt.get("earnings", 0)
-        next_bet_amount = calculate_bet_amount(rt)
-        await send_to_admin(
-            client,
-            _build_alert_ops_card(
-                "达到预设连投上限，已重置",
-                impact=f"连输达到上限，计数已重置，从首注 {initial_amount} 重新开始。",
-                fields=[("当前上限", f"{lose_stop} 手")],
-                action="如需调整上限，可修改预设参数。",
-            ),
-            user_ctx,
-            global_config,
-        )
+        rt["bet"] = False
+        rt["bet_on"] = False
+        rt["mode_stop"] = True
+        _clear_lose_recovery_tracking(rt)
+        if not rt.get("limit_stop_notified", False):
+            lose_stop = int(rt.get("lose_stop", 13))
+            await send_to_admin(
+                client,
+                _build_alert_ops_card(
+                    "⚠️ 已达到预设连投上限",
+                    impact="当前链路已经到达设定的最大连投次数，系统将保持暂停。",
+                    fields=[("当前上限", f"{lose_stop} 手")],
+                    action="如需继续，可切换预设，或执行 `res bet` 后重新启动。",
+                ),
+                user_ctx,
+                global_config,
+            )
+            rt["limit_stop_notified"] = True
         user_ctx.save_state()
         return
 
+    rt["limit_stop_notified"] = False
     if is_fund_available(user_ctx, next_bet_amount) and not rt.get("bet", False) and rt.get("switch", True) and rt.get("stop_count", 0) == 0:
         await _clear_pause_countdown_notice(client, user_ctx)
         # 这里只恢复“可下注状态”，不应提前标记为“已下注”。
