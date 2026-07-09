@@ -1943,7 +1943,7 @@ def _build_help_card() -> str:
         "<b>📘 脚本命令指南</b>\n\n"
         "<b>⚡ 常用命令</b>\n"
         "• <code>/st [预设名]</code> 启动预设并切换（如 <code>/st 5k</code>）\n"
-        "• <code>/mt</code> 交替模式（反向下注：开 1 押 0，开 0 押 1）\n"
+        "• <code>/mt [预设名]</code> 交替模式（加载预设并反向下注：开 1 押 0，开 0 押 1）\n"
         "• <code>/status</code> 查看运行状态看板\n"
         "• <code>/pause</code> / <code>/resume</code> 暂停/恢复下注\n"
         "• <code>/balance</code> 刷新当前账户余额\n\n"
@@ -7261,7 +7261,42 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
             return
         
         # mt - 切换到交替模式（反向下注：开 1 押 0，开 0 押 1）
+        # 用法：mt [预设名]  例如：mt 5w
         if cmd == "mt":
+            preset_name = my[1] if len(my) > 1 else rt.get("current_preset_name", "")
+            
+            if preset_name and preset_name in presets:
+                preset = presets[preset_name]
+                rt["continuous"] = int(preset[0])
+                rt["lose_stop"] = int(preset[1])
+                rt["lose_once"] = float(preset[2])
+                rt["lose_twice"] = float(preset[3])
+                rt["lose_three"] = float(preset[4])
+                rt["lose_four"] = float(preset[5])
+                rt["initial_amount"] = int(preset[6])
+                rt["current_preset_name"] = preset_name
+                rt["bet_amount"] = int(preset[6])
+                rt["_bet_base"] = int(preset[6])
+                rt["lose_count"] = 0
+                rt["win_count"] = 0
+                rt["bet_sequence_count"] = 0
+                auto_pause_count = int(preset[8]) if len(preset) > 8 else 0
+                rt["auto_pause_count"] = auto_pause_count
+                await _clear_pause_countdown_notice(client, user_ctx)
+                rt["risk_deep_triggered_milestones"] = []
+                rt["fund_pause_notified"] = False
+                rt["limit_stop_notified"] = False
+                _clear_lose_recovery_tracking(rt)
+            elif len(my) > 1 and preset_name not in presets:
+                preset_list = ", ".join(presets.keys())
+                mes = _build_ops_card(
+                    "❌ 预设不存在",
+                    summary=f"可用预设：{preset_list}",
+                    action="使用 `/mt [预设名]` 切换预设并开启交替模式。",
+                )
+                await send_to_admin(client, mes, user_ctx, global_config)
+                return
+            
             # 设置 bet_direction 为 reverse，实现反向下注
             rt["bet_direction"] = "reverse"
             rt["switch"] = True
@@ -7271,20 +7306,25 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
             rt["bet"] = False  # 等待真实盘口触发下注
             user_ctx.save_state()
             
-            preset_name = rt.get("current_preset_name", "")
-            
+            current_preset = rt.get("current_preset_name", "") or "未设置"
             extra_line = "• 额外加注：触发长龙或交替形态时 +100 万" if rt.get("extra_dragon_bet_enabled", True) else "• 额外加注：已关闭"
+
+            param_str = ""
+            if current_preset != "未设置" and current_preset in presets:
+                p = presets[current_preset]
+                param_str = f"• 策略参数：{p[0]} {p[1]} {p[2]} {p[3]} {p[4]} {p[5]} {p[6]}\n"
 
             mes = (
                 f"<b>已切换到交替模式</b>\n\n"
                 f"• 下注方向：反向（开 1 押 0，开 0 押 1）\n"
-                f"• 当前预设：{preset_name or '未设置'}\n"
+                f"• 当前预设：{current_preset}\n"
+                f"{param_str}"
                 f"{extra_line}\n\n"
                 f"执行 <code>/ysz</code> 查看所有预设的完整倍投序列"
             )
             await send_to_admin(client, mes, user_ctx, global_config)
             log_event(logging.INFO, 'user_cmd', 'mt', user_id=user_ctx.user_id,
-                      data="mode=alternation, direction=reverse")
+                      data=f"mode=alternation, direction=reverse, preset={current_preset}")
             return
         
         # stats - 查看连大、连小、连输、交替统计
