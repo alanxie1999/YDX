@@ -6457,6 +6457,16 @@ async def _process_settle_slim(client, event, user_ctx: UserContext, global_conf
                 else:
                     # 累积倍投：基于上一手 bet_amount 继续倍投
                     rt["bet_amount"] = int(active_chain_summary.get("last_amount", bet_amount) or bet_amount)
+            else:
+                # 长龙/交替额外加注押中后，重置预设从首注重新开始
+                if rt.get("dragon_has_bet", False):
+                    rt["bet_amount"] = int(rt.get("initial_amount", 500))
+                    rt["_bet_base"] = int(rt.get("initial_amount", 500))
+                    rt["lose_count"] = 0
+                    rt["win_count"] = 0
+                    rt["bet_sequence_count"] = 0
+                    rt["dragon_has_bet"] = False
+                    rt["dragon_tail_streak"] = 0
 
             if _verbose_runtime_diag_enabled():
                 saved_bet_base = rt.get("_bet_base", 0)
