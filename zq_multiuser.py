@@ -1,6 +1,6 @@
 """
 zq_multiuser.py - 多用户版本核心逻辑
-版本：2.4.9
+版本：2.4.10
 日期：2026-08-04
 功能：多用户押注、结算、命令处理
 """
@@ -1937,7 +1937,7 @@ def _build_help_card() -> str:
         "• <code>/apikey show</code> 查看当前密钥状态\n"
         "• <code>/apikey set</code> / <code>/apikey add</code> / <code>/apikey del</code> 管理密钥\n\n"
         "<b>📋 预设与测算（进阶）</b>\n"
-        "• <code>/yss</code> 查看全部预设\n"
+        "• <code>/yss</code> / <code>/ysz</code> 查看全部预设（ysz 为旧版别名）\n"
         "• <code>/yss dl [名]</code> 删除预设\n"
         "• <code>/ys [名称] [连续] [止损] [一输] [二输] [三输] [四输] [首注]</code> 新增或覆盖预设\n"
         "<i>例：/ys 2w 1 10 3.0 2.5 2.2 2.1 20000</i>\n"
@@ -7884,40 +7884,94 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
             return
         
         # ========== 预设管理命令 ==========
-        # ys - 保存预设 - 与master一致
-        if cmd == "ys" and len(my) >= 9:
-            try:
-                preset_name = my[1]
-                ys = [int(my[2]), int(my[3]), float(my[4]), float(my[5]), float(my[6]), float(my[7]), int(my[8])]
-                presets[preset_name] = ys
-                user_ctx.save_presets()
-                rt["current_preset_name"] = preset_name
-                user_ctx.save_state()
-                mes = _build_ops_card(
-                    f"✅ 预设保存成功: {preset_name}",
-                    summary="新的预设参数已经写入当前账号，并设置为当前预设。",
-                    fields=[("策略参数", f"{ys[0]} {ys[1]} {ys[2]} {ys[3]} {ys[4]} {ys[5]} {ys[6]}")],
-                    action=f"建议执行 `st {preset_name}` 或 `status` 确认当前状态。",
-                )
-                log_event(logging.INFO, 'user_cmd', '保存预设策略', user_id=user_ctx.user_id, preset=preset_name, params=ys)
+        # ys - 保存预设（兼容 v2.0.3 的 `ys 替换/删除` 格式）
+        if cmd == "ys":
+            sub_action = my[1].lower() if len(my) > 1 else ""
+            if sub_action in ("删除", "del", "delete", "rm"):
+                # v2.0.3 格式：ys 删除 [预设名]
+                if len(my) < 3:
+                    await send_to_admin(
+                        client,
+                        _build_ops_card(
+                            "❌ 预设删除失败",
+                            summary="缺少预设名称。",
+                            action="请执行 `ys 删除 [预设名]`，例如 `ys 删除 1w`。",
+                        ),
+                        user_ctx,
+                        global_config,
+                    )
+                    return
+                preset_name = my[2]
+                if preset_name in presets:
+                    del presets[preset_name]
+                    user_ctx.save_presets()
+                    mes = _build_ops_card(
+                        f"✅ 预设删除成功: {preset_name}",
+                        summary="该预设已经从当前账号配置中移除。",
+                        action="建议执行 `yss` 再确认剩余预设。",
+                    )
+                    log_event(logging.INFO, 'user_cmd', '删除预设', user_id=user_ctx.user_id, preset=preset_name)
+                else:
+                    mes = _build_ops_card(
+                        "❌ 预设删除失败",
+                        summary="目标预设不存在或命令格式不正确。",
+                        action="请先执行 `yss` 查看当前预设名称，再执行 `ys 删除 [名]`。",
+                    )
+                    log_event(logging.WARNING, 'user_cmd', '删除预设失败', user_id=user_ctx.user_id, cmd=text)
                 message = await send_to_admin(client, mes, user_ctx, global_config)
                 asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
                 if message:
                     asyncio.create_task(delete_later(client, message.chat_id, message.id, 10))
-            except (ValueError, IndexError) as e:
-                await send_to_admin(
-                    client,
-                    _build_ops_card(
-                        "❌ 预设保存失败",
-                        summary="参数格式不正确，当前预设没有写入。",
-                        fields=[("错误", str(e)[:180])],
-                        action="请按 `ys [名] ...` 的格式重新输入完整参数。",
-                    ),
-                    user_ctx,
-                    global_config,
-                )
-            return
-        if cmd == "ys":
+                return
+
+            # v2.0.3 格式 `ys 替换 [预设名] ...` 时跳过第一个子命令
+            param_offset = 1 if sub_action in ("替换", "replace", "set", "update") else 0
+            if len(my) >= 9 + param_offset:
+                try:
+                    preset_name = my[1 + param_offset]
+                    ys = [
+                        int(my[2 + param_offset]),
+                        int(my[3 + param_offset]),
+                        float(my[4 + param_offset]),
+                        float(my[5 + param_offset]),
+                        float(my[6 + param_offset]),
+                        float(my[7 + param_offset]),
+                        int(my[8 + param_offset]),
+                    ]
+                    # v2.0.3 可选参数：押注方向、自动暂停
+                    if param_offset == 1:
+                        if len(my) > 10:
+                            ys.append(my[10])
+                        if len(my) > 11:
+                            ys.append(my[11])
+                    presets[preset_name] = ys
+                    user_ctx.save_presets()
+                    rt["current_preset_name"] = preset_name
+                    user_ctx.save_state()
+                    mes = _build_ops_card(
+                        f"✅ 预设保存成功: {preset_name}",
+                        summary="新的预设参数已经写入当前账号，并设置为当前预设。",
+                        fields=[("策略参数", f"{ys[0]} {ys[1]} {ys[2]} {ys[3]} {ys[4]} {ys[5]} {ys[6]}")],
+                        action=f"建议执行 `st {preset_name}` 或 `status` 确认当前状态。",
+                    )
+                    log_event(logging.INFO, 'user_cmd', '保存预设策略', user_id=user_ctx.user_id, preset=preset_name, params=ys)
+                    message = await send_to_admin(client, mes, user_ctx, global_config)
+                    asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
+                    if message:
+                        asyncio.create_task(delete_later(client, message.chat_id, message.id, 10))
+                except (ValueError, IndexError) as e:
+                    await send_to_admin(
+                        client,
+                        _build_ops_card(
+                            "❌ 预设保存失败",
+                            summary="参数格式不正确，当前预设没有写入。",
+                            fields=[("错误", str(e)[:180])],
+                            action="请按 `ys [名] [连续] [停] [倍1] [倍2] [倍3] [倍4] [首注]` 或 `ys 替换 [名] ...` 的格式重新输入完整参数。",
+                        ),
+                        user_ctx,
+                        global_config,
+                    )
+                return
             await send_to_admin(
                 client,
                 _build_ops_card(
@@ -7966,8 +8020,8 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 asyncio.create_task(delete_later(client, message.chat_id, message.id, 10))
             return
 
-        # yss - 查看/删除预设 - 与master一致
-        if cmd == "yss":
+        # yss/ysz - 查看/删除预设（ysz 为兼容 2.0.3 的别名）
+        if cmd in ("yss", "ysz"):
             if len(my) > 2 and my[1] == "dl":
                 # 删除预设
                 preset_name = my[2]
