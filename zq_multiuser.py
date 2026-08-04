@@ -1,6 +1,6 @@
 """
 zq_multiuser.py - 多用户版本核心逻辑
-版本：2.4.8
+版本：2.4.9
 日期：2026-08-04
 功能：多用户押注、结算、命令处理
 """
@@ -4924,7 +4924,7 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
 
 
 def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
-    """5 连以上长龙期间，每次下注额外加 1000000，直到不中后停止。edb 关闭时禁用。"""
+    """6 连以上长龙期间，每次下注额外加 1000000，直到不中后停止。edb 关闭时禁用。"""
     if not rt.get("edb", True):
         return 0
     if rt.get("lose_count", 0) > 0:
@@ -4942,13 +4942,13 @@ def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
     else:
         rt["_history_cache"] = history
 
-    if not isinstance(history, list) or len(history) < 5:
+    if not isinstance(history, list) or len(history) < 6:
         rt["dragon_extra_active"] = False
         return 0
 
     streak, _ = _get_history_tail_streak(history)
 
-    if streak >= 5:
+    if streak >= 6:
         rt["dragon_extra_active"] = True
         rt["dragon_tail_streak"] = streak
         return 1000000
