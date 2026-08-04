@@ -8,7 +8,7 @@ VERSION_FILE="zq_multiuser.py"
 CHANGELOG_FILE="docs/CHANGELOG.md"
 
 # 获取当前版本号
-CURRENT_VERSION=$(grep "^版本:" "$VERSION_FILE" | awk '{print $2}')
+CURRENT_VERSION=$(grep "^版本：" "$VERSION_FILE" | sed 's/^版本：//')
 echo "当前版本：$CURRENT_VERSION"
 
 # 解析版本号

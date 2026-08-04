@@ -1,7 +1,7 @@
 """
 zq_multiuser.py - 多用户版本核心逻辑
-版本：2.4.7
-日期：2026-07-02
+版本：2.4.8
+日期：2026-08-04
 功能：多用户押注、结算、命令处理
 """
 
@@ -4303,8 +4303,15 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
     log_event(logging.INFO, 'bet_on', '策略诊断', user_id=user_ctx.user_id, 
               data=f"历史：{history[-10:]}, 最后一手：{history[-1] if history else '无'}")
     
-    # 优先级 0: 检查是否有强制延续下注
+    # 优先级 0: 检查是否有强制延续下注（edb 关闭时禁用，仅按预设方向下注）
     forced_remaining = rt.get("forced_bet_remaining", 0)
+    if forced_remaining > 0 and history and not rt.get("edb", True):
+        # edb 关闭：强制延续属于动态策略，禁用并清除遗留状态，仅按预设方向下注
+        rt["forced_bet_remaining"] = 0
+        rt["forced_bet_direction"] = 0
+        forced_remaining = 0
+        log_event(logging.INFO, 'bet_on', 'EDB关闭禁用强制延续', user_id=user_ctx.user_id,
+                  data="清除强制延续状态，仅按预设方向下注")
     if forced_remaining > 0 and history:
         forced_dir = rt.get("forced_bet_direction", history[-1])
         prediction = forced_dir
