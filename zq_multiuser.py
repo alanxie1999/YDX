@@ -1,6 +1,6 @@
 """
 zq_multiuser.py - 多用户版本核心逻辑
-版本：2.4.10
+版本：2.4.11
 日期：2026-08-04
 功能：多用户押注、结算、命令处理
 """
@@ -8045,6 +8045,86 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
                 if message:
                     asyncio.create_task(delete_later(client, message.chat_id, message.id, 10))
+            elif len(my) > 1:
+                # 查看指定预设详情（兼容 v2.0.3 的 `ysz [预设名]`）
+                target_preset = my[1]
+                if target_preset not in presets:
+                    preset_list = ", ".join(sorted(presets.keys()))
+                    mes = _build_ops_card(
+                        f"❌ 预设不存在：{target_preset}",
+                        summary="没有找到同名预设。",
+                        fields=[("可用预设", preset_list or "无")],
+                        action="执行 `yss` 查看全部预设，或 `yss [预设名]` 查看指定预设。",
+                    )
+                else:
+                    try:
+                        params = presets[target_preset]
+                        base = int(params[6])
+                        multipliers = [float(params[2]), float(params[3]), float(params[4]), float(params[5])]
+                        lose_stop = int(params[1])
+                        bet_direction = str(params[7]) if len(params) > 7 else "auto"
+                        auto_pause_count = int(params[8]) if len(params) > 8 else 0
+
+                        # 计算连续倍投的每一手金额和累计所需资金
+                        hand_lines = []
+                        current = base
+                        total_needed = 0
+                        for i in range(1, lose_stop + 1):
+                            if i == 1:
+                                current = base
+                                label = "首注"
+                            elif i <= 5:
+                                mult = multipliers[i - 2]
+                                current = int(current * mult)
+                                label = f"×{mult} 倍"
+                            else:
+                                current = int(current * multipliers[-1])
+                                label = "持续倍投"
+                            total_needed += current
+                            hand_lines.append(
+                                f"├ 第{i:2d}手：{_format_money_message(current):>10}（累计：{_format_money_message(total_needed):>10}）{label}"
+                            )
+
+                        if hand_lines:
+                            hand_lines[-1] = hand_lines[-1].replace("├", "└", 1)
+
+                        direction_label = {
+                            "same": "同向",
+                            "reverse": "反向",
+                            "auto": "跟随策略",
+                            "0": "固定下小",
+                            "1": "固定下大",
+                        }.get(bet_direction, bet_direction)
+                        extra_bet_state = "开启（长龙 6 连或规律触发时 +100 万）" if rt.get("edb", True) else "已关闭"
+
+                        mes = (
+                            f"【 {target_preset} 预设详情 】\n"
+                            f"最多连投：{lose_stop:2d} 手\n\n"
+                            f"💵 倍投计划\n"
+                            + "\n".join(hand_lines) +
+                            f"\n\n💰 总需资金：{_format_money_message(total_needed)}\n\n"
+                            f"⚙️ 策略参数\n"
+                            f"初始金额：{_format_money_message(base)}\n"
+                            f"押注倍率：{multipliers[0]} / {multipliers[1]} / {multipliers[2]} / {multipliers[3]}\n"
+                            f"押注方向：{direction_label}\n"
+                            f"自动暂停：{auto_pause_count} 局\n"
+                            f"长龙加注：{extra_bet_state}\n\n"
+                            f"💡 说明\n"
+                            f"• 第 1 手为首注，第 2 手起基于前一手金额连续倍投\n"
+                            f"• 每输一手按倍率递增，总风险为总需资金"
+                        )
+                    except (ValueError, IndexError, TypeError) as e:
+                        mes = _build_ops_card(
+                            "❌ 预设详情解析失败",
+                            summary="该预设参数格式异常，无法计算倍投计划。",
+                            fields=[("错误", str(e)[:180])],
+                            action="可执行 `ys [名] ...` 重新保存该预设。",
+                        )
+                log_event(logging.INFO, 'user_cmd', '查看预设详情', user_id=user_ctx.user_id, preset=target_preset)
+                message = await send_to_admin(client, mes, user_ctx, global_config)
+                asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
+                if message:
+                    asyncio.create_task(delete_later(client, message.chat_id, message.id, 120))
             else:
                 # 查看所有预设
                 if len(presets) > 0:
