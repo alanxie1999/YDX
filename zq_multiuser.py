@@ -1,7 +1,7 @@
 """
 zq_multiuser.py - 多用户版本核心逻辑
-版本：2.4.11
-日期：2026-08-04
+版本：2.4.12
+日期：2026-08-05
 功能：多用户押注、结算、命令处理
 """
 
@@ -670,17 +670,6 @@ def _apply_inferred_settle_from_history(state: UserState, rt: Dict[str, Any], op
             rt["dragon_tail_streak"] = 0
         else:
             rt["bet_amount"] = int(active_chain_summary.get("last_amount", bet_amount) or bet_amount)
-    
-    # 固定金额模式：连输达到 auto_pause_count 后标记待暂停
-    auto_pause_count = int(rt.get("auto_pause_count", 0) or 0)
-    is_fixed_bet = (rt.get("lose_once", 3.0) == 1.0 and rt.get("lose_twice", 2.1) == 1.0 and 
-                    rt.get("lose_three", 2.1) == 1.0 and rt.get("lose_four", 2.05) == 1.0)
-    if not win and is_fixed_bet and auto_pause_count > 0:
-        lose_count = rt.get("lose_count", 0)
-        if lose_count >= auto_pause_count:
-            # 标记待暂停，在 _handle_fixed_bet_auto_pause_after_settle 中实际执行
-            rt["auto_pause_triggered"] = True
-            rt["auto_pause_lose_count"] = lose_count
     
     if win or rt.get("lose_count", 0) >= rt.get("lose_stop", 13):
         rt["bet_sequence_count"] = 0
@@ -1960,8 +1949,7 @@ def _build_help_card() -> str:
         "• <code>/st fix1w_same/fix1w_rev/fix1w_0/fix1w_1</code> 固定 1 万\n"
         "• <code>/st fix10w_same/fix10w_rev/fix10w_0/fix10w_1</code> 固定 10 万\n"
         "• <code>/st fix25w_same/fix25w_rev/fix25w_0/fix25w_1</code> 固定 25 万\n"
-        "<i>same=跟随上一手，reverse=与上一手相反，0=永远下小，1=永远下大</i>\n"
-        "<i>连输 10 局自动暂停 10 局，暂停结束后继续</i>\n\n"
+        "<i>same=跟随上一手，reverse=与上一手相反，0=永远下小，1=永远下大</i>\n\n"
         "<b>🛠 系统与数据（进阶）</b>\n"
         "• <code>/res tj</code> 重置收益/胜率统计\n"
         "• <code>/res state</code> 彻底重置状态\n"
@@ -5881,52 +5869,6 @@ async def _trigger_deep_risk_pause_after_settle(
     return True
 
 
-async def _handle_fixed_bet_auto_pause_after_settle(
-    client,
-    user_ctx: UserContext,
-    global_config: dict,
-) -> bool:
-    """处理固定金额模式连输自动暂停后的通知。"""
-    rt = user_ctx.state.runtime
-    
-    # 检查是否触发了自动暂停
-    if not rt.get("auto_pause_triggered", False):
-        return False
-    
-    auto_pause_count = int(rt.get("auto_pause_count", 0) or 0)
-    lose_count = int(rt.get("auto_pause_lose_count", 0) or 0)
-    
-    if auto_pause_count <= 0 or lose_count <= 0:
-        # 清除触发标记
-        rt["auto_pause_triggered"] = False
-        rt.pop("auto_pause_lose_count", None)
-        return False
-    
-    # 设置暂停
-    _enter_pause(rt, auto_pause_count, f"固定金额模式连输{lose_count}局自动暂停")
-    rt["bet_on"] = False
-    rt["mode_stop"] = True
-    
-    # 清除触发标记
-    rt["auto_pause_triggered"] = False
-    rt.pop("auto_pause_lose_count", None)
-    
-    resume_hint = _build_pause_resume_hint(rt)
-    pause_msg = (
-        f"⛔ 固定金额模式自动暂停 ⛔\n\n"
-        f"触发原因：连输{lose_count}局达到暂停阈值\n"
-        f"暂停局数：{auto_pause_count} 局\n"
-        f"暂停期间：不重置连输计数，保持当前状态\n"
-        f"{resume_hint}"
-    )
-    
-    await send_message_v2(client, "pause", pause_msg, user_ctx, global_config)
-    log_event(logging.INFO, 'settle', '固定金额模式连输暂停', user_id=user_ctx.user_id,
-              data=f"连输{lose_count}局，暂停{auto_pause_count}局")
-    
-    return True
-
-
 async def _handle_goal_pause_after_settle(
     client,
     user_ctx: UserContext,
@@ -6648,9 +6590,6 @@ async def _process_settle_slim(client, event, user_ctx: UserContext, global_conf
         if len(state.history) % 5 == 0:
             user_ctx.save_state()
 
-        # 固定金额模式连输自动暂停通知（在 goal pause 之前处理）
-        await _handle_fixed_bet_auto_pause_after_settle(client, user_ctx, global_config)
-
         await _handle_goal_pause_after_settle(client, user_ctx, global_config)
 
         if hasattr(user_ctx, 'dashboard_message') and user_ctx.dashboard_message:
@@ -7277,9 +7216,6 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 # 读取方向参数（第 8 个参数，可选）
                 bet_direction = preset[7] if len(preset) > 7 else "auto"
                 rt["bet_direction"] = bet_direction
-                # 读取自动暂停参数（第 9 个参数，固定金额模式连输 n 局后暂停 n 局）
-                auto_pause_count = int(preset[8]) if len(preset) > 8 else 0
-                rt["auto_pause_count"] = auto_pause_count
                 await _clear_pause_countdown_notice(client, user_ctx)
                 rt["switch"] = True
                 rt["manual_pause"] = False
@@ -7938,12 +7874,10 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                         float(my[7 + param_offset]),
                         int(my[8 + param_offset]),
                     ]
-                    # v2.0.3 可选参数：押注方向、自动暂停
+                    # v2.0.3 可选参数：押注方向
                     if param_offset == 1:
                         if len(my) > 10:
                             ys.append(my[10])
-                        if len(my) > 11:
-                            ys.append(my[11])
                     presets[preset_name] = ys
                     user_ctx.save_presets()
                     rt["current_preset_name"] = preset_name
@@ -8063,7 +7997,6 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                         multipliers = [float(params[2]), float(params[3]), float(params[4]), float(params[5])]
                         lose_stop = int(params[1])
                         bet_direction = str(params[7]) if len(params) > 7 else "auto"
-                        auto_pause_count = int(params[8]) if len(params) > 8 else 0
 
                         # 计算连续倍投的每一手金额和累计所需资金
                         hand_lines = []
@@ -8107,7 +8040,6 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                             f"初始金额：{_format_money_message(base)}\n"
                             f"押注倍率：{multipliers[0]} / {multipliers[1]} / {multipliers[2]} / {multipliers[3]}\n"
                             f"押注方向：{direction_label}\n"
-                            f"自动暂停：{auto_pause_count} 局\n"
                             f"长龙加注：{extra_bet_state}\n\n"
                             f"💡 说明\n"
                             f"• 第 1 手为首注，第 2 手起基于前一手金额连续倍投\n"
