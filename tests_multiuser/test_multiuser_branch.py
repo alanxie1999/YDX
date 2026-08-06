@@ -3804,6 +3804,83 @@ def test_st_command_triggers_auto_yc_report(tmp_path, monkeypatch):
     assert any("连数|倍率|下注| 盈利 |所需本金" in msg for msg in sent_messages)
 
 
+def test_mt_command_switches_preset_and_enters_alternation_mode(tmp_path, monkeypatch):
+    user_dir = tmp_path / "users" / "5008b"
+    _write_json(
+        user_dir / "config.json",
+        {
+            "account": {"name": "交替模式用户"},
+            "telegram": {"user_id": 5008},
+            "groups": {"admin_chat": 5008},
+            "notification": {"iyuu": {"enable": False}, "tg_bot": {"enable": False}},
+        },
+    )
+    ctx = UserContext(str(user_dir))
+    rt = ctx.state.runtime
+
+    sent_messages = []
+
+    async def fake_send_to_admin(client, message, user_ctx, global_cfg):
+        sent_messages.append(message)
+        return SimpleNamespace(chat_id=5008, id=len(sent_messages))
+
+    def fake_create_task(coro):
+        coro.close()
+        return None
+
+    monkeypatch.setattr(zm, "send_to_admin", fake_send_to_admin)
+    monkeypatch.setattr(zm.asyncio, "create_task", fake_create_task)
+
+    cmd_event = SimpleNamespace(raw_text="mt 5k", chat_id=5008, id=22)
+    asyncio.run(zm.process_user_command(SimpleNamespace(), cmd_event, ctx, {}))
+
+    assert rt.get("current_preset_name") == "5k"
+    assert rt.get("bet_direction") == "reverse"
+    assert rt.get("switch") is True
+    assert rt.get("bet_on") is True
+    assert rt.get("mode_stop") is True
+    assert rt.get("bet") is False
+    assert any("交替模式" in msg for msg in sent_messages)
+    assert any("反向" in msg for msg in sent_messages)
+
+
+def test_mt_command_without_preset_uses_current_preset(tmp_path, monkeypatch):
+    user_dir = tmp_path / "users" / "5008c"
+    _write_json(
+        user_dir / "config.json",
+        {
+            "account": {"name": "交替模式无参用户"},
+            "telegram": {"user_id": 5008},
+            "groups": {"admin_chat": 5008},
+            "notification": {"iyuu": {"enable": False}, "tg_bot": {"enable": False}},
+        },
+    )
+    ctx = UserContext(str(user_dir))
+    rt = ctx.state.runtime
+    rt["current_preset_name"] = "1w"
+
+    sent_messages = []
+
+    async def fake_send_to_admin(client, message, user_ctx, global_cfg):
+        sent_messages.append(message)
+        return SimpleNamespace(chat_id=5008, id=len(sent_messages))
+
+    def fake_create_task(coro):
+        coro.close()
+        return None
+
+    monkeypatch.setattr(zm, "send_to_admin", fake_send_to_admin)
+    monkeypatch.setattr(zm.asyncio, "create_task", fake_create_task)
+
+    cmd_event = SimpleNamespace(raw_text="mt", chat_id=5008, id=23)
+    asyncio.run(zm.process_user_command(SimpleNamespace(), cmd_event, ctx, {}))
+
+    assert rt.get("current_preset_name") == "1w"
+    assert rt.get("bet_direction") == "reverse"
+    assert rt.get("bet_on") is True
+    assert any("交替模式" in msg for msg in sent_messages)
+
+
 def test_xx_command_cleans_messages_in_config_groups(tmp_path, monkeypatch):
     user_dir = tmp_path / "users" / "5009"
     _write_json(

@@ -1,7 +1,7 @@
 """
 zq_multiuser.py - 多用户版本核心逻辑
-版本：2.4.12
-日期：2026-08-05
+版本：2.4.13
+日期：2026-08-06
 功能：多用户押注、结算、命令处理
 """
 
@@ -1908,6 +1908,7 @@ def _build_help_card() -> str:
         "常用：<code>st</code> <code>status</code> <code>pause</code> <code>balance</code>\n\n"
         "<b>⚡ 基础控制（最常用）</b>\n"
         "• <code>/st [预设名]</code> 启动（带名切换并启动）\n"
+        "• <code>/mt [预设名]</code> 交替模式（加载预设并反向下注：开 1 押 0，开 0 押 1）\n"
         "• <code>/status</code> 查看运行状态看板\n"
         "• <code>/pause</code> / <code>/resume</code> 暂停/恢复下注\n"
         "• <code>/balance</code> 刷新当前账户余额\n"
@@ -7262,6 +7263,74 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                     user_ctx,
                     global_config,
                 )
+            return
+        
+        # mt - 切换预设并开启交替模式（反向下注） - 兼容 v2.0.3
+        if cmd == "mt":
+            preset_name = my[1] if len(my) > 1 else rt.get("current_preset_name", "")
+
+            if preset_name and preset_name in presets:
+                preset = presets[preset_name]
+                rt["continuous"] = int(preset[0])
+                rt["lose_stop"] = int(preset[1])
+                rt["lose_once"] = float(preset[2])
+                rt["lose_twice"] = float(preset[3])
+                rt["lose_three"] = float(preset[4])
+                rt["lose_four"] = float(preset[5])
+                rt["initial_amount"] = int(preset[6])
+                rt["current_preset_name"] = preset_name
+                rt["bet_amount"] = int(preset[6])
+                rt["lose_count"] = 0
+                rt["win_count"] = 0
+                rt["bet_sequence_count"] = 0
+                await _clear_pause_countdown_notice(client, user_ctx)
+                rt["risk_deep_triggered_milestones"] = []
+                rt["fund_pause_notified"] = False
+                rt["limit_stop_notified"] = False
+                _clear_lose_recovery_tracking(rt)
+            elif len(my) > 1 and preset_name not in presets:
+                preset_list = ", ".join(presets.keys())
+                mes = _build_ops_card(
+                    "❌ 预设不存在",
+                    summary=f"可用预设：{preset_list}",
+                    action="使用 `/mt [预设名]` 切换预设并开启交替模式。",
+                )
+                await send_to_admin(client, mes, user_ctx, global_config)
+                return
+
+            # 设置 bet_direction 为 reverse，实现反向下注（交替模式）
+            rt["bet_direction"] = "reverse"
+            rt["switch"] = True
+            rt["manual_pause"] = False
+            rt["bet_on"] = True
+            rt["mode_stop"] = True
+            rt["bet"] = False  # mt 命令不直接设置 bet=True，等待真实盘口触发下注
+            user_ctx.save_state()
+
+            current_preset = rt.get("current_preset_name", "") or "未设置"
+            extra_line = "开启（长龙或交替形态触发时 +100 万）" if rt.get("edb", True) else "已关闭"
+
+            fields = [
+                ("下注方向", "反向（开 1 押 0，开 0 押 1）"),
+                ("当前预设", current_preset),
+            ]
+            if current_preset != "未设置" and current_preset in presets:
+                p = presets[current_preset]
+                fields.append(("策略参数", f"{p[0]} {p[1]} {p[2]} {p[3]} {p[4]} {p[5]} {p[6]}"))
+            fields.append(("长龙加注", extra_line))
+
+            mes = _build_ops_card(
+                "✅ 已切换到交替模式",
+                summary="当前账号已切换到反向下注模式，后续按反向方向进入可下注状态。",
+                fields=fields,
+                action="建议执行 `status` 确认当前状态；执行 `yss` 查看所有预设的完整倍投序列。",
+            )
+            message = await send_to_admin(client, mes, user_ctx, global_config)
+            asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
+            if message:
+                asyncio.create_task(delete_later(client, message.chat_id, message.id, 10))
+            log_event(logging.INFO, 'user_cmd', 'mt', user_id=user_ctx.user_id,
+                      data=f"mode=alternation, direction=reverse, preset={current_preset}")
             return
         
         # stats - 查看连大、连小、连输统计
