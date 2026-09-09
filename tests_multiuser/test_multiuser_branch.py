@@ -4900,12 +4900,12 @@ def test_dragon_extra_mt_mode_same_dragon_bets_same_direction():
     assert zm._apply_dragon_extra_direction(rt, history, 0) == 1
 
 
-def test_dragon_extra_mt_mode_ignores_alternation_dragon():
+def test_dragon_extra_mt_mode_alternation_dragon_bets_alternation():
     history = [1, 0, 1, 0, 1, 0]
     rt = _dragon_extra_rt(bet_direction="reverse")
-    assert zm._get_dragon_extra_bet_amount(rt, history) == 0
-    assert rt["dragon_extra_active"] is False
-    assert zm._apply_dragon_extra_direction(rt, history, 1) == 1
+    assert zm._get_dragon_extra_bet_amount(rt, history) == 1_000_000
+    assert rt["dragon_extra_active"] is True
+    assert zm._apply_dragon_extra_direction(rt, history, 0) == 1
 
 
 def test_dragon_extra_st_mode_alt_dragon_bets_alternation():
@@ -4916,16 +4916,9 @@ def test_dragon_extra_st_mode_alt_dragon_bets_alternation():
     assert zm._apply_dragon_extra_direction(rt, history, 0) == 1
 
 
-def test_dragon_extra_st_mode_ignores_same_dragon():
+def test_dragon_extra_st_mode_same_dragon_bets_same_direction():
     history = [0, 1, 1, 1, 1, 1, 1]
     rt = _dragon_extra_rt(bet_direction="same")
-    assert zm._get_dragon_extra_bet_amount(rt, history) == 0
-    assert rt["dragon_extra_active"] is False
-
-
-def test_dragon_extra_fixed_direction_keeps_preset_side():
-    history = [0, 0, 0, 0, 0, 0]
-    rt = _dragon_extra_rt(bet_direction="1")
     assert zm._get_dragon_extra_bet_amount(rt, history) == 1_000_000
     assert rt["dragon_extra_active"] is True
-    assert zm._apply_dragon_extra_direction(rt, history, 1) == 1
+    assert zm._apply_dragon_extra_direction(rt, history, 0) == 1

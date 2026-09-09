@@ -93,13 +93,13 @@ def test_mt_mode_same_dragon_bets_same_direction():
     print("ok mt same dragon")
 
 
-def test_mt_mode_ignores_alternation_dragon():
+def test_mt_mode_alternation_dragon_bets_alternation():
     history = [1, 0, 1, 0, 1, 0]
     rt = _dragon_extra_rt(bet_direction="reverse")
-    assert zm._get_dragon_extra_bet_amount(rt, history) == 0
-    assert rt["dragon_extra_active"] is False
-    assert zm._apply_dragon_extra_direction(rt, history, 1) == 1
-    print("ok mt ignores alt")
+    assert zm._get_dragon_extra_bet_amount(rt, history) == 1_000_000
+    assert rt["dragon_extra_active"] is True
+    assert zm._apply_dragon_extra_direction(rt, history, 0) == 1
+    print("ok mt alt dragon")
 
 
 def test_st_mode_alt_dragon_bets_alternation():
@@ -111,21 +111,13 @@ def test_st_mode_alt_dragon_bets_alternation():
     print("ok st alt dragon")
 
 
-def test_st_mode_ignores_same_dragon():
+def test_st_mode_same_dragon_bets_same_direction():
     history = [0, 1, 1, 1, 1, 1, 1]
     rt = _dragon_extra_rt(bet_direction="same")
-    assert zm._get_dragon_extra_bet_amount(rt, history) == 0
-    assert rt["dragon_extra_active"] is False
-    print("ok st ignores same")
-
-
-def test_fixed_direction_keeps_preset_side():
-    history = [0, 0, 0, 0, 0, 0]
-    rt = _dragon_extra_rt(bet_direction="1")
     assert zm._get_dragon_extra_bet_amount(rt, history) == 1_000_000
     assert rt["dragon_extra_active"] is True
-    assert zm._apply_dragon_extra_direction(rt, history, 1) == 1
-    print("ok fixed direction")
+    assert zm._apply_dragon_extra_direction(rt, history, 0) == 1
+    print("ok st same dragon")
 
 
 if __name__ == "__main__":
@@ -135,8 +127,7 @@ if __name__ == "__main__":
     test_stop_after_miss()
     test_after_six_losses()
     test_mt_mode_same_dragon_bets_same_direction()
-    test_mt_mode_ignores_alternation_dragon()
+    test_mt_mode_alternation_dragon_bets_alternation()
     test_st_mode_alt_dragon_bets_alternation()
-    test_st_mode_ignores_same_dragon()
-    test_fixed_direction_keeps_preset_side()
+    test_st_mode_same_dragon_bets_same_direction()
     print("all passed")

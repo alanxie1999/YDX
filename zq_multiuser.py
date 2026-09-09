@@ -1,6 +1,6 @@
 """
 zq_multiuser.py - 多用户版本核心逻辑
-版本：2.4.14
+版本：2.4.15
 日期：2026-09-09
 功能：多用户押注、结算、命令处理
 """
@@ -4971,27 +4971,13 @@ def _detect_dragon_extra_signal(history: list) -> Dict[str, Any]:
     return {"active": False}
 
 
-def _dragon_extra_signal_matches_mode(rt: dict, signal: dict) -> bool:
-    """MT（反向下注）只对同向长龙额外加注；ST（同向下注）只对交替长龙额外加注；其余方向两种长龙都加注。"""
-    bet_direction = str(rt.get("bet_direction", "") or "auto")
-    kind = str(signal.get("kind", "") or "")
-    if bet_direction == "reverse":
-        return kind == "same"
-    if bet_direction == "same":
-        return kind == "alt"
-    return True
-
-
 def _apply_dragon_extra_direction(rt: dict, history: list, prediction: int) -> int:
-    """同向长龙额外押同向；交替长龙额外押交替。固定方向预设（0/1）保持原方向。"""
+    """同向长龙额外押同向；交替长龙额外押交替。"""
     if not rt.get("edb", True):
         return int(prediction)
     if not rt.get("dragon_extra_active", False):
         _get_dragon_extra_bet_amount(rt, history)
     if not rt.get("dragon_extra_active", False):
-        return int(prediction)
-
-    if str(rt.get("bet_direction", "") or "") in ("0", "1"):
         return int(prediction)
 
     direction = rt.get("dragon_extra_direction")
@@ -5022,7 +5008,7 @@ def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
 
     rt["_history_cache"] = history
     signal = _detect_dragon_extra_signal(history)
-    if signal.get("active") and _dragon_extra_signal_matches_mode(rt, signal):
+    if signal.get("active"):
         rt["dragon_extra_active"] = True
         rt["dragon_tail_streak"] = int(signal.get("streak", 0) or 0)
         rt["dragon_extra_kind"] = str(signal.get("kind", "") or "")
