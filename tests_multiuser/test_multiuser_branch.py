@@ -4828,8 +4828,8 @@ def _dragon_extra_rt(**overrides):
     return rt
 
 
-def test_dragon_extra_same_direction_triggers_on_six_streak():
-    history = [0, 1, 1, 1, 1, 1, 1]
+def test_dragon_extra_same_direction_triggers_on_seven_streak():
+    history = [0, 1, 1, 1, 1, 1, 1, 1]
     signal = zm._detect_dragon_extra_signal(history)
     assert signal["active"] is True
     assert signal["kind"] == "same"
@@ -4843,21 +4843,21 @@ def test_dragon_extra_same_direction_triggers_on_six_streak():
     assert zm.calculate_bet_amount(rt, history) == 1_005_000
 
 
-def test_dragon_extra_alternation_triggers_on_six_streak():
-    history = [1, 0, 1, 0, 1, 0]
+def test_dragon_extra_alternation_triggers_on_seven_streak():
+    history = [1, 0, 1, 0, 1, 0, 1]
     signal = zm._detect_dragon_extra_signal(history)
     assert signal["active"] is True
     assert signal["kind"] == "alt"
-    assert signal["direction"] == 1
+    assert signal["direction"] == 0
 
     rt = _dragon_extra_rt()
     amount = zm._get_dragon_extra_bet_amount(rt, history)
     assert amount == 1_000_000
-    assert zm._apply_dragon_extra_direction(rt, history, 0) == 1
+    assert zm._apply_dragon_extra_direction(rt, history, 1) == 0
 
 
 def test_dragon_extra_keeps_going_after_win():
-    history = [1, 1, 1, 1, 1, 1]
+    history = [1, 1, 1, 1, 1, 1, 1]
     rt = _dragon_extra_rt()
     assert zm._get_dragon_extra_bet_amount(rt, history) == 1_000_000
 
@@ -4870,7 +4870,7 @@ def test_dragon_extra_keeps_going_after_win():
 
 
 def test_dragon_extra_stops_after_miss():
-    history = [1, 1, 1, 1, 1, 1]
+    history = [1, 1, 1, 1, 1, 1, 1]
     rt = _dragon_extra_rt()
     assert zm._get_dragon_extra_bet_amount(rt, history) == 1_000_000
     zm._clear_dragon_extra_runtime(rt)
@@ -4882,7 +4882,7 @@ def test_dragon_extra_stops_after_miss():
 
 
 def test_dragon_extra_still_triggers_after_six_martingale_losses():
-    history = [0, 1, 1, 1, 1, 1, 1]
+    history = [0, 1, 1, 1, 1, 1, 1, 1]
     rt = _dragon_extra_rt(lose_count=6, bet_amount=225_000)
     extra = zm._get_dragon_extra_bet_amount(rt, history)
     assert extra == 1_000_000
@@ -4893,7 +4893,7 @@ def test_dragon_extra_still_triggers_after_six_martingale_losses():
 
 
 def test_dragon_extra_mt_mode_same_dragon_bets_same_direction():
-    history = [0, 1, 1, 1, 1, 1, 1]
+    history = [0, 1, 1, 1, 1, 1, 1, 1]
     rt = _dragon_extra_rt(bet_direction="reverse")
     assert zm._get_dragon_extra_bet_amount(rt, history) == 1_000_000
     assert rt["dragon_extra_active"] is True
@@ -4901,23 +4901,23 @@ def test_dragon_extra_mt_mode_same_dragon_bets_same_direction():
 
 
 def test_dragon_extra_mt_mode_alternation_dragon_bets_alternation():
-    history = [1, 0, 1, 0, 1, 0]
+    history = [1, 0, 1, 0, 1, 0, 1]
     rt = _dragon_extra_rt(bet_direction="reverse")
     assert zm._get_dragon_extra_bet_amount(rt, history) == 1_000_000
     assert rt["dragon_extra_active"] is True
-    assert zm._apply_dragon_extra_direction(rt, history, 0) == 1
+    assert zm._apply_dragon_extra_direction(rt, history, 1) == 0
 
 
 def test_dragon_extra_st_mode_alt_dragon_bets_alternation():
-    history = [1, 0, 1, 0, 1, 0]
+    history = [1, 0, 1, 0, 1, 0, 1]
     rt = _dragon_extra_rt(bet_direction="same")
     assert zm._get_dragon_extra_bet_amount(rt, history) == 1_000_000
     assert rt["dragon_extra_active"] is True
-    assert zm._apply_dragon_extra_direction(rt, history, 0) == 1
+    assert zm._apply_dragon_extra_direction(rt, history, 1) == 0
 
 
 def test_dragon_extra_st_mode_same_dragon_bets_same_direction():
-    history = [0, 1, 1, 1, 1, 1, 1]
+    history = [0, 1, 1, 1, 1, 1, 1, 1]
     rt = _dragon_extra_rt(bet_direction="same")
     assert zm._get_dragon_extra_bet_amount(rt, history) == 1_000_000
     assert rt["dragon_extra_active"] is True
