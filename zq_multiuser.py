@@ -1,6 +1,6 @@
 """
 zq_multiuser.py - 多用户版本核心逻辑
-版本：2.4.16
+版本：2.4.17
 日期：2026-09-09
 功能：多用户押注、结算、命令处理
 """
@@ -4913,7 +4913,7 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
 
 
 DRAGON_EXTRA_AMOUNT = 1000000
-DRAGON_EXTRA_MIN_STREAK = 7
+DRAGON_EXTRA_MIN_STREAK = 6
 
 
 def _clear_dragon_extra_runtime(rt: dict) -> None:
