@@ -1,6 +1,6 @@
 """
 main_multiuser.py - 多用户版本主程序
-版本: 2.4.18
+版本: 2.4.19
 日期: 2026-11-03
 功能: 支持多用户并发运行的Telegram客户端
 """
@@ -11,6 +11,7 @@ import os
 import sys
 import errno
 import json
+import re
 from datetime import datetime
 try:
     import fcntl
