@@ -4856,6 +4856,30 @@ def test_dragon_extra_alternation_triggers_on_six_streak():
     assert zm._apply_dragon_extra_direction(rt, history, 0) == 1
 
 
+def test_dragon_extra_alternation_triggers_on_five_streak():
+    history = [1, 0, 1, 0, 1]
+    signal = zm._detect_dragon_extra_signal(history)
+    assert signal["active"] is True
+    assert signal["kind"] == "alt"
+    assert signal["streak"] == 5
+    assert signal["direction"] == 0
+
+    rt = _dragon_extra_rt()
+    assert zm._get_dragon_extra_bet_amount(rt, history) == 1_000_000
+    assert rt["dragon_extra_active"] is True
+    assert zm._apply_dragon_extra_direction(rt, history, 1) == 0
+
+
+def test_dragon_extra_same_direction_still_requires_six_streak():
+    history = [1, 1, 1, 1, 1]
+    signal = zm._detect_dragon_extra_signal(history)
+    assert signal["active"] is False
+
+    rt = _dragon_extra_rt()
+    assert zm._get_dragon_extra_bet_amount(rt, history) == 0
+    assert rt["dragon_extra_active"] is False
+
+
 def test_dragon_extra_keeps_going_after_win():
     history = [1, 1, 1, 1, 1, 1]
     rt = _dragon_extra_rt()

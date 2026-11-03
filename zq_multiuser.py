@@ -1,7 +1,7 @@
 """
 zq_multiuser.py - 多用户版本核心逻辑
-版本：2.4.17
-日期：2026-09-09
+版本：2.4.18
+日期：2026-11-03
 功能：多用户押注、结算、命令处理
 """
 
@@ -4914,6 +4914,8 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
 
 DRAGON_EXTRA_AMOUNT = 1000000
 DRAGON_EXTRA_MIN_STREAK = 6
+# 交替长龙提前一手：历史尾部 5 连交替（如 10101）时，第 6 手下注即加注。
+DRAGON_EXTRA_ALT_MIN_STREAK = 5
 
 
 def _clear_dragon_extra_runtime(rt: dict) -> None:
@@ -4942,8 +4944,13 @@ def _get_alternation_tail_streak(history: list) -> int:
 
 
 def _detect_dragon_extra_signal(history: list) -> Dict[str, Any]:
-    """识别同向长龙或交替长龙，并给出额外加注方向。"""
-    if not isinstance(history, list) or len(history) < DRAGON_EXTRA_MIN_STREAK:
+    """识别同向长龙或交替长龙，并给出额外加注方向。
+
+    同向长龙达到 DRAGON_EXTRA_MIN_STREAK 连后触发；
+    交替长龙达到 DRAGON_EXTRA_ALT_MIN_STREAK 连后触发（提前一手）。
+    """
+    min_len = min(DRAGON_EXTRA_MIN_STREAK, DRAGON_EXTRA_ALT_MIN_STREAK)
+    if not isinstance(history, list) or len(history) < min_len:
         return {"active": False}
 
     same_streak, same_dir = _get_history_tail_streak(history)
@@ -4956,7 +4963,7 @@ def _detect_dragon_extra_signal(history: list) -> Dict[str, Any]:
         }
 
     alt_streak = _get_alternation_tail_streak(history)
-    if alt_streak >= DRAGON_EXTRA_MIN_STREAK:
+    if alt_streak >= DRAGON_EXTRA_ALT_MIN_STREAK:
         try:
             latest = int(history[-1])
         except Exception:
@@ -4996,7 +5003,10 @@ def _apply_dragon_extra_direction(rt: dict, history: list, prediction: int) -> i
 
 
 def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
-    """同向/交替长龙期间每次额外加 1000000；赢了继续，不中后停止。edb 关闭时禁用。"""
+    """同向/交替长龙期间每次额外加 1000000；赢了继续，不中后停止。edb 关闭时禁用。
+
+    同向长龙需 6 连，交替长龙需 5 连（第 6 手即加注）。
+    """
     if not rt.get("edb", True):
         _clear_dragon_extra_runtime(rt)
         return 0
