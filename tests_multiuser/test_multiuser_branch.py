@@ -1204,7 +1204,7 @@ def test_process_bet_on_allows_short_history_like_master(tmp_path, monkeypatch):
     assert len(ctx.state.bet_sequence_log) == 1
 
 
-def test_process_bet_on_overrides_model_with_alternation_break_same_side(tmp_path, monkeypatch):
+def test_process_bet_on_alternation_break_cancelled_follows_last(tmp_path, monkeypatch):
     user_dir = tmp_path / "users" / "4010"
     _write_json(
         user_dir / "config.json",
@@ -1268,15 +1268,13 @@ def test_process_bet_on_overrides_model_with_alternation_break_same_side(tmp_pat
     asyncio.run(zm.process_bet_on(SimpleNamespace(), event, ctx, {}))
 
     assert rt["bet"] is True
-    assert rt["bet_type"] == 0
-    assert rt["last_predict_source"] == "alternation_break"
-    assert "├ 🧬 5局：" in rt["last_predict_info"]
-    assert "├ 🤖 大模型： 交替拉满了，直接按打断规则走" in rt["last_predict_info"]
-    assert "└ 🎯 押注结论： 本局坚决押【小】" in rt["last_predict_info"]
-    assert any("押注方向：小" in message for message in sent_messages)
+    assert rt["bet_type"] == 1
+    assert rt["last_predict_source"] == "follow_last"
+    assert "预测方向：大" in rt["last_predict_info"]
+    assert any("押注方向：大" in message for message in sent_messages)
 
 
-def test_process_bet_on_alternation_break_can_override_skip(tmp_path, monkeypatch):
+def test_process_bet_on_alternation_break_cancelled_ignores_model_skip(tmp_path, monkeypatch):
     user_dir = tmp_path / "users" / "4011"
     _write_json(
         user_dir / "config.json",
@@ -1340,12 +1338,10 @@ def test_process_bet_on_alternation_break_can_override_skip(tmp_path, monkeypatc
     asyncio.run(zm.process_bet_on(SimpleNamespace(), event, ctx, {}))
 
     assert rt["bet"] is True
-    assert rt["bet_type"] == 1
-    assert rt["last_predict_source"] == "alternation_break"
-    assert "├ 🧬 5局：" in rt["last_predict_info"]
-    assert "├ 🤖 大模型： 交替拉满了，直接按打断规则走" in rt["last_predict_info"]
-    assert "└ 🎯 押注结论： 本局坚决押【大】" in rt["last_predict_info"]
-    assert any("押注方向：大" in message for message in sent_messages)
+    assert rt["bet_type"] == 0
+    assert rt["last_predict_source"] == "follow_last"
+    assert "预测方向：小" in rt["last_predict_info"]
+    assert any("押注方向：小" in message for message in sent_messages)
 
 
 def test_process_bet_on_recovers_when_source_message_id_invalid(tmp_path, monkeypatch):

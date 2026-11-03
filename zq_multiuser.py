@@ -1,6 +1,6 @@
 """
 zq_multiuser.py - 多用户版本核心逻辑
-版本：2.4.19
+版本：2.4.21
 日期：2026-11-03
 功能：多用户押注、结算、命令处理
 """
@@ -287,8 +287,7 @@ HIGH_STEP_DOUBLE_CONFIRM_PAUSE_ROUNDS = 2
 HIGH_STEP_DOUBLE_CONFIRM_MODEL_TIMEOUT_SEC = 5.0
 
 # 纯交替增强（旧版 AI 模型逻辑，已废弃）：当最近盘口“由近到远”出现 6 位纯交替时，
-# 注：当前简单跟随策略使用 5 位检测（10101/01010），在第 5 注后反向打破
-# 主脚本强制按最新一手同向下注，尝试结束交替。
+# 注：简单跟随策略已取消 5 位纯交替反向打破，统一按预设跟随上一手。
 ALTERNATION_BREAK_TRIGGER_WINDOW = 6
 ALTERNATION_BREAK_PATTERNS = {"010101", "101010"}
 
@@ -1919,7 +1918,7 @@ def _build_help_card() -> str:
         "• <code>/wlc [n]</code> 连输相关阈值\n\n"
         "<b>🤖 模型与策略（进阶）</b>\n"
         "• <code>/mfb [on/off]</code> 模型链异常时是否继续统计兜底下注\n"
-        "• <code>/edb [on/off]</code> 长龙增强开关（规律检测/交替打破/长龙加注）\n"
+        "• <code>/edb [on/off]</code> 长龙增强开关（规律检测/长龙加注）\n"
         "• <code>/model list</code> 查看可用模型\n"
         "• <code>/model select [编号/ID]</code> 切换模型（支持编号）\n"
         "<i>例：/model select 1</i>\n"
@@ -4379,25 +4378,7 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
                 rt["last_predict_reason"] = reason
                 log_event(logging.INFO, 'bet_on', '固定规律', user_id=user_ctx.user_id,
                           data=f"seq={seq}, follow={follow}, prediction={prediction}")
-            # 优先级 2: 5 位纯交替打破
-            elif len(history) >= 5:
-                last_5 = "".join(str(x) for x in history[-5:])
-                if last_5 in ("10101", "01010"):
-                    prediction = 1 - history[-1]
-                    rt["last_predict_source"] = "alternation_break"
-                    rt["last_predict_tag"] = "ALTERNATION_BREAK"
-                    rt["last_predict_confidence"] = 100
-                    rt["last_predict_reason"] = f"5 位纯交替{last_5}，反向下注{'大' if prediction == 1 else '小'}"
-                    log_event(logging.INFO, 'bet_on', '交替打破', user_id=user_ctx.user_id,
-                              data=f"last_5={last_5}, history[-1]={history[-1]}, prediction={prediction}")
-                else:
-                    prediction = history[-1]
-                    rt["last_predict_source"] = "follow_last"
-                    rt["last_predict_tag"] = "FOLLOW_TREND"
-                    rt["last_predict_confidence"] = 50
-                    rt["last_predict_reason"] = f"跟随上一手{history[-1]}，下{'大' if prediction == 1 else '小'}"
-                    log_event(logging.INFO, 'bet_on', '跟随策略', user_id=user_ctx.user_id,
-                              data=f"history[-1]={history[-1]}, prediction={prediction}")
+            # 优先级 2: 跟随上一手（交替打破已取消，统一按预设跟随）
             else:
                 prediction = history[-1]
                 rt["last_predict_source"] = "follow_last"
@@ -6438,7 +6419,7 @@ async def _process_settle_slim(client, event, user_ctx: UserContext, global_conf
             rt["account_balance"] = await fetch_balance(user_ctx)
             rt["balance_status"] = "success"
         except Exception as e:
-            log_event(logging.WARNING, 'settle', '鑾峰彇璐︽埛浣欓澶辫触锛屼娇鐢ㄩ粯璁ゅ€?', user_id=user_ctx.user_id, data=str(e))
+            log_event(logging.WARNING, 'settle', '获取账户余额失败，使用默认值', user_id=user_ctx.user_id, data=str(e))
             rt["balance_status"] = "network_error"
 
         state.history.append(result)
@@ -8075,7 +8056,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 user_ctx.save_state()
                 mes = _build_ops_card(
                     "🐉 长龙增强已开启",
-                    summary="固定规律检测、交替打破、长龙额外加注均已启用。",
+                    summary="固定规律检测、长龙额外加注均已启用。",
                     action="执行 `status` 可确认当前状态。",
                 )
                 log_event(logging.INFO, 'user_cmd', 'EDB已开启', user_id=user_ctx.user_id)
@@ -8084,7 +8065,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 user_ctx.save_state()
                 mes = _build_ops_card(
                     "🐉 长龙增强已关闭",
-                    summary="已禁用固定规律检测、交替打破和长龙额外加注，仅按预设方向下注。",
+                    summary="已禁用固定规律检测和长龙额外加注，仅按预设方向下注。",
                     action="执行 `status` 可确认当前状态。",
                 )
                 log_event(logging.INFO, 'user_cmd', 'EDB已关闭', user_id=user_ctx.user_id)
@@ -8093,7 +8074,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 state_text = "开启" if current else "关闭"
                 mes = _build_ops_card(
                     f"🐉 长龙增强状态：{state_text}",
-                    summary="长龙增强控制固定规律检测、交替打破和长龙额外加注。",
+                    summary="长龙增强控制固定规律检测和长龙额外加注。",
                     fields=[("当前状态", state_text)],
                     action="执行 `edb on` 开启，`edb off` 关闭。",
                 )
@@ -8177,7 +8158,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                             "0": "固定下小",
                             "1": "固定下大",
                         }.get(bet_direction, bet_direction)
-                        extra_bet_state = "开启（长龙 6 连或规律触发时 +100 万）" if rt.get("edb", True) else "已关闭"
+                        extra_bet_state = "开启（同向 6 连 / 交替 5 连时 +100 万）" if rt.get("edb", True) else "已关闭"
 
                         mes = (
                             f"【 {target_preset} 预设详情 】\n"
