@@ -1,6 +1,6 @@
 """
 zq_multiuser.py - 多用户版本核心逻辑
-版本：2.4.25
+版本：2.4.26
 日期：2026-11-03
 功能：多用户押注、结算、命令处理
 """
@@ -448,6 +448,9 @@ def _collect_effective_bet_chain(state: UserState, include_open: bool = False) -
 
     chain: List[Dict[str, Any]] = []
     for item in reversed(effective_logs):
+        # 长龙额外加注不参与预设倍投链路：遇到即断开，避免把额外加注的输赢带入连输/倍投。
+        if item.get("dragon_extra"):
+            break
         chain.append(item)
         if item.get("result") == "赢" and len(chain) > 1:
             chain.pop()
@@ -648,9 +651,10 @@ def _apply_inferred_settle_from_history(state: UserState, rt: Dict[str, Any], op
             int(active_chain_summary.get("lose_count", 0)),
             old_lose_count + 1,
         )
-        # 长龙额外加注不中后停止，按默认金额下注
+        # 长龙额外加注不中后停止，重置倍投，下一手按预设初始金额下注
         if rt.get("dragon_extra_active", False):
             rt["bet_amount"] = int(rt.get("initial_amount", 500))
+            rt["lose_count"] = 0
             _clear_dragon_extra_runtime(rt)
         else:
             rt["bet_amount"] = int(active_chain_summary.get("last_amount", bet_amount) or bet_amount)
@@ -4397,7 +4401,8 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
         "result": None,
         "profit": 0,
         "lose_stop": rt.get("lose_stop", 13),
-        "profit_target": rt.get("profit", 1000000)
+        "profit_target": rt.get("profit", 1000000),
+        "dragon_extra": bool(rt.get("last_predict_source") == "dragon_extra"),
     })
     _clear_hand_stall_guard(rt)
 
@@ -6390,9 +6395,10 @@ async def _process_settle_slim(client, event, user_ctx: UserContext, global_conf
                     int(active_chain_summary.get("lose_count", 0)),
                     int(old_lose_count) + 1,
                 )
-                # 长龙额外加注不中后停止，按默认金额下注
+                # 长龙额外加注不中后停止，重置倍投，下一手按预设初始金额下注
                 if rt.get("dragon_extra_active", False):
                     rt["bet_amount"] = int(rt.get("initial_amount", 500))
+                    rt["lose_count"] = 0
                     _clear_dragon_extra_runtime(rt)
                 else:
                     rt["bet_amount"] = int(active_chain_summary.get("last_amount", bet_amount) or bet_amount)

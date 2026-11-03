@@ -154,6 +154,48 @@ def test_st_mode_same_dragon_bets_same_direction():
     print("ok st same dragon")
 
 
+def test_dragon_extra_loss_resets_martingale():
+    from types import SimpleNamespace
+
+    rt = _dragon_extra_rt(dragon_extra_active=True, bet_type=1, bet_amount=1_005_000)
+    entry = {
+        "bet_id": "1_1_1",
+        "sequence": 1,
+        "direction": "big",
+        "amount": 1_005_000,
+        "result": None,
+        "profit": 0,
+        "lose_stop": 13,
+        "profit_target": 1_000_000,
+        "dragon_extra": True,
+    }
+    state = SimpleNamespace(bet_sequence_log=[entry], bet_type_history=[], runtime=rt)
+    settle = zm._apply_inferred_settle_from_history(state, rt, entry, 0)
+    assert settle["win"] is False
+    assert rt["dragon_extra_active"] is False
+    assert rt["lose_count"] == 0
+    assert rt["bet_amount"] == 5_000
+    assert zm.calculate_bet_amount(rt) == 5_000
+    print("ok dragon loss resets martingale")
+
+
+def test_dragon_extra_chain_break():
+    from types import SimpleNamespace
+
+    state = SimpleNamespace(
+        bet_sequence_log=[
+            {"result": "输", "profit": -5_000, "amount": 5_000},
+            {"result": "输", "profit": -1_005_000, "amount": 1_005_000, "dragon_extra": True},
+            {"result": "输", "profit": -5_000, "amount": 5_000},
+        ],
+        runtime={},
+    )
+    summary = zm._summarize_effective_bet_chain(state)
+    assert summary["lose_count"] == 1
+    assert summary["continuous_count"] == 1
+    print("ok dragon chain break")
+
+
 if __name__ == "__main__":
     test_same_direction()
     test_alternation()
@@ -167,4 +209,6 @@ if __name__ == "__main__":
     test_mt_mode_alternation_dragon_bets_alternation()
     test_st_mode_alt_dragon_bets_alternation()
     test_st_mode_same_dragon_bets_same_direction()
+    test_dragon_extra_loss_resets_martingale()
+    test_dragon_extra_chain_break()
     print("all passed")
