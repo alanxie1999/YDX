@@ -8383,6 +8383,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
 
         # yss - 查看/删除预设 - 与master一致
         if cmd == "yss":
+            log_event(logging.INFO, 'user_cmd', 'yss命令入口命中', user_id=user_ctx.user_id, preset_count=len(presets))
             if len(my) > 2 and my[1] == "dl":
                 # 删除预设
                 preset_name = my[2]
