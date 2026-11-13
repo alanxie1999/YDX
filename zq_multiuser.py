@@ -4355,6 +4355,8 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
             "click_ms": 0,
             "predict_timeout_sec": predict_timeout_sec,
             "click_timeout_sec": click_timeout_sec,
+            "next_sequence": int(next_sequence),
+            "click_interval_sec": click_interval_sec,
         }
         await _execute_bet_flow(client, event, user_ctx, global_config, prediction, bet_amount, timing_ctx)
         return
@@ -4485,6 +4487,8 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
         "click_ms": 0,
         "predict_timeout_sec": predict_timeout_sec,
         "click_timeout_sec": click_timeout_sec,
+        "next_sequence": int(next_sequence),
+        "click_interval_sec": click_interval_sec,
     }
     await _execute_bet_flow(client, event, user_ctx, global_config, prediction, bet_amount, timing_ctx)
 
