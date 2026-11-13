@@ -1,7 +1,7 @@
 """
 zq_multiuser.py - 多用户版本核心逻辑
-版本：2.4.26
-日期：2026-11-03
+版本：2.4.7
+日期：2026-07-02
 功能：多用户押注、结算、命令处理
 """
 
@@ -287,9 +287,24 @@ HIGH_STEP_DOUBLE_CONFIRM_PAUSE_ROUNDS = 2
 HIGH_STEP_DOUBLE_CONFIRM_MODEL_TIMEOUT_SEC = 5.0
 
 # 纯交替增强（旧版 AI 模型逻辑，已废弃）：当最近盘口“由近到远”出现 6 位纯交替时，
-# 注：简单跟随策略已取消 5 位纯交替反向打破，统一按预设跟随上一手。
+# 注：当前简单跟随策略使用 5 位检测（10101/01010），在第 5 注后反向打破
+# 主脚本强制按最新一手同向下注，尝试结束交替。
 ALTERNATION_BREAK_TRIGGER_WINDOW = 6
 ALTERNATION_BREAK_PATTERNS = {"010101", "101010"}
+
+# 固定数据规律：检测到特定序列后，按照规律下注
+FIXED_PATTERNS = {
+    "010101": {"follow": "reverse", "label": "交替循环反转"},  # 按最新一手反向下注
+    "101010": {"follow": "reverse", "label": "交替循环反转"},  # 按最新一手反向下注
+    "111111": {"follow": "1", "label": "大龙延续"},
+    "000000": {"follow": "0", "label": "小龙延续"},
+    "00101": {"follow": "reverse", "label": "00101反向下注"},
+    "11010": {"follow": "reverse", "label": "11010反向下注"},
+    "001010": {"follow": "same", "label": "001010同向下注"},
+    "110101": {"follow": "same", "label": "110101同向下注"},
+    "10100": {"follow": "same", "duration": 2, "label": "10100 后续 2 次同向"},
+    "01011": {"follow": "same", "duration": 2, "label": "01011 后续 2 次同向"},
+}
 
 # 同手位防卡死：避免 SKIP/超时导致长期不落单
 STALL_GUARD_SKIP_MAX = 2
@@ -448,9 +463,6 @@ def _collect_effective_bet_chain(state: UserState, include_open: bool = False) -
 
     chain: List[Dict[str, Any]] = []
     for item in reversed(effective_logs):
-        # 长龙额外加注不参与预设倍投链路：遇到即断开，避免把额外加注的输赢带入连输/倍投。
-        if item.get("dragon_extra"):
-            break
         chain.append(item)
         if item.get("result") == "赢" and len(chain) > 1:
             chain.pop()
@@ -651,13 +663,24 @@ def _apply_inferred_settle_from_history(state: UserState, rt: Dict[str, Any], op
             int(active_chain_summary.get("lose_count", 0)),
             old_lose_count + 1,
         )
-        # 长龙额外加注不中后停止，重置倍投，下一手按预设初始金额下注
+        # 长龙额外加注不中后，按默认金额下注
         if rt.get("dragon_extra_active", False):
             rt["bet_amount"] = int(rt.get("initial_amount", 500))
-            rt["lose_count"] = 0
-            _clear_dragon_extra_runtime(rt)
+            rt["dragon_extra_active"] = False
+            rt["dragon_tail_streak"] = 0
         else:
             rt["bet_amount"] = int(active_chain_summary.get("last_amount", bet_amount) or bet_amount)
+    
+    # 固定金额模式：连输达到 auto_pause_count 后标记待暂停
+    auto_pause_count = int(rt.get("auto_pause_count", 0) or 0)
+    is_fixed_bet = (rt.get("lose_once", 3.0) == 1.0 and rt.get("lose_twice", 2.1) == 1.0 and 
+                    rt.get("lose_three", 2.1) == 1.0 and rt.get("lose_four", 2.05) == 1.0)
+    if not win and is_fixed_bet and auto_pause_count > 0:
+        lose_count = rt.get("lose_count", 0)
+        if lose_count >= auto_pause_count:
+            # 标记待暂停，在 _handle_fixed_bet_auto_pause_after_settle 中实际执行
+            rt["auto_pause_triggered"] = True
+            rt["auto_pause_lose_count"] = lose_count
     
     if win or rt.get("lose_count", 0) >= rt.get("lose_stop", 13):
         rt["bet_sequence_count"] = 0
@@ -1896,7 +1919,6 @@ def _build_help_card() -> str:
         "常用：<code>st</code> <code>status</code> <code>pause</code> <code>balance</code>\n\n"
         "<b>⚡ 基础控制（最常用）</b>\n"
         "• <code>/st [预设名]</code> 启动（带名切换并启动）\n"
-        "• <code>/mt [预设名]</code> 交替模式（加载预设并反向下注：开 1 押 0，开 0 押 1）\n"
         "• <code>/status</code> 查看运行状态看板\n"
         "• <code>/pause</code> / <code>/resume</code> 暂停/恢复下注\n"
         "• <code>/balance</code> 刷新当前账户余额\n"
@@ -1909,7 +1931,7 @@ def _build_help_card() -> str:
         "<b>🤖 模型与策略（进阶）</b>\n"
         "• <code>/aib [on/off]</code> AI智能下注开关：on=大模型判断方向，off=预设规律下注\n"
         "• <code>/mfb [on/off]</code> 模型链异常时是否继续统计兜底下注\n"
-        "• <code>/edb [on/off]</code> 长龙增强开关（规律检测/长龙加注）\n"
+        "• <code>/edb [on/off]</code> 长龙增强开关（规律检测/交替打破/长龙加注）\n"
         "• <code>/model list</code> 查看可用模型\n"
         "• <code>/model select [编号/ID]</code> 切换模型（支持编号）\n"
         "<i>例：/model select 1</i>\n"
@@ -1922,7 +1944,7 @@ def _build_help_card() -> str:
         "• <code>/apikey show</code> 查看当前密钥状态\n"
         "• <code>/apikey set</code> / <code>/apikey add</code> / <code>/apikey del</code> 管理密钥\n\n"
         "<b>📋 预设与测算（进阶）</b>\n"
-        "• <code>/yss</code> / <code>/ysz</code> 查看全部预设（ysz 为旧版别名）\n"
+        "• <code>/yss</code> 查看全部预设\n"
         "• <code>/yss dl [名]</code> 删除预设\n"
         "• <code>/ys [名称] [连续] [止损] [一输] [二输] [三输] [四输] [首注]</code> 新增或覆盖预设\n"
         "<i>例：/ys 2w 1 10 3.0 2.5 2.2 2.1 20000</i>\n"
@@ -1945,7 +1967,8 @@ def _build_help_card() -> str:
         "• <code>/st fix1w_same/fix1w_rev/fix1w_0/fix1w_1</code> 固定 1 万\n"
         "• <code>/st fix10w_same/fix10w_rev/fix10w_0/fix10w_1</code> 固定 10 万\n"
         "• <code>/st fix25w_same/fix25w_rev/fix25w_0/fix25w_1</code> 固定 25 万\n"
-        "<i>same=跟随上一手，reverse=与上一手相反，0=永远下小，1=永远下大</i>\n\n"
+        "<i>same=跟随上一手，reverse=与上一手相反，0=永远下小，1=永远下大</i>\n"
+        "<i>连输 10 局自动暂停 10 局，暂停结束后继续</i>\n\n"
         "<b>🛠 系统与数据（进阶）</b>\n"
         "• <code>/res tj</code> 重置收益/胜率统计\n"
         "• <code>/res state</code> 彻底重置状态\n"
@@ -2947,6 +2970,102 @@ def _clear_alternation_break_runtime(rt: dict) -> None:
     rt["alternation_break_active"] = False
     rt["alternation_break_seq"] = ""
     rt["alternation_break_side"] = ""
+
+
+def _detect_fixed_pattern_signal(
+    history: list,
+) -> Dict[str, Any]:
+    """识别固定数据序列信号，并给出相应的下注方向。支持不同长度的模式。"""
+    if not isinstance(history, list) or len(history) < 5:
+        return {"active": False}
+
+    history_str = "".join(str(x) for x in history)
+
+    for pattern, config in FIXED_PATTERNS.items():
+        pattern_len = len(pattern)
+        if len(history) < pattern_len:
+            continue
+
+        recent_seq = history_str[-pattern_len:]
+        if recent_seq == pattern:
+            follow_pattern = config["follow"]
+            label = config["label"]
+            latest_value = int(history[-1])
+
+            if follow_pattern == "reverse":
+                prediction = 1 - latest_value
+            elif follow_pattern == "same":
+                prediction = latest_value
+            elif len(follow_pattern) == 1:
+                prediction = int(follow_pattern)
+            else:
+                prediction = latest_value
+
+            return {
+                "active": True,
+                "detected_seq": recent_seq,
+                "window": pattern_len,
+                "follow_pattern": follow_pattern,
+                "label": label,
+                "prediction": prediction,
+                "duration": config.get("duration", 1),
+            }
+
+    return {"active": False}
+
+
+def _apply_fixed_pattern_override(
+    rt: dict,
+    history: list,
+    prediction: int,
+) -> int:
+    """在固定数据盘面里，按照检测到的规律下注。"""
+    signal = _detect_fixed_pattern_signal(history)
+    if not signal.get("active", False):
+        return int(prediction)
+
+    forced_prediction = int(signal.get("prediction", prediction))
+    side_text = "大" if forced_prediction == 1 else "小"
+    detected_seq = str(signal.get("detected_seq", ""))
+    label = str(signal.get("label", "固定规律"))
+    follow_pattern = str(signal.get("follow_pattern", ""))
+    latest_value = int(history[-1]) if history else 0
+
+    # 构建原因说明
+    if follow_pattern == "reverse":
+        latest_side = "大" if latest_value == 1 else "小"
+        predict_side = "小" if latest_side == "大" else "大"
+        reason_text = f"检测到{label}（{detected_seq}），反向下注{predict_side}"
+    elif follow_pattern == "same":
+        reason_text = f"检测到{label}（{detected_seq}），同向下注{side_text}"
+    else:
+        reason_text = f"检测到{label}（{detected_seq}），按照规律下注{side_text}"
+
+    rt["fixed_pattern_active"] = True
+    rt["fixed_pattern_seq"] = detected_seq
+    rt["fixed_pattern_side"] = side_text
+    rt["fixed_pattern_label"] = label
+    rt["last_predict_source"] = "fixed_pattern"
+    rt["last_predict_tag"] = "FIXED_PATTERN"
+    rt["last_predict_confidence"] = 100
+    rt["last_predict_reason"] = reason_text
+    rt["last_predict_info"] = _build_predict_basis_text(
+        history=history,
+        prediction=forced_prediction,
+        source="fixed_pattern",
+        pattern_tag="FIXED_PATTERN",
+        rhythm_tag=label,
+        tail_streak_len=len(follow_pattern) if len(follow_pattern) > 1 else 1,
+        tail_streak_char=forced_prediction,
+    )
+    return forced_prediction
+
+
+def _clear_fixed_pattern_runtime(rt: dict) -> None:
+    rt["fixed_pattern_active"] = False
+    rt["fixed_pattern_seq"] = ""
+    rt["fixed_pattern_side"] = ""
+    rt["fixed_pattern_label"] = ""
 
 
 def _apply_alternation_break_override(
@@ -4191,6 +4310,9 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
     log_event(logging.INFO, 'bet_on', '策略诊断', user_id=user_ctx.user_id, 
               data=f"历史：{history[-10:]}, 最后一手：{history[-1] if history else '无'}")
     
+    # AI 调用计时起点（放在 AI 分支前）
+    if bool(rt.get("ai_bet_enabled", False)):
+        _ai_started_at = time.monotonic()
     # 优先级 -1: AI 智能下注开关开启时，由大模型决定方向（aib on）
     if bool(rt.get("ai_bet_enabled", False)):
         ai_prediction = await predict_next_bet_core(user_ctx, global_config, current_round=next_sequence)
@@ -4222,15 +4344,22 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
         prediction = int(ai_prediction)
         log_event(logging.INFO, 'bet_on', 'AI智能下注', user_id=user_ctx.user_id,
                   data=f"prediction={prediction}, confidence={rt.get('last_predict_confidence')}")
-    # 优先级 0: 检查是否有强制延续下注（edb 关闭时禁用，仅按预设方向下注）
+        # AI 模式：直接进入下注执行，跳过所有预设分支，避免 bet_direction/固定规律覆盖 AI 判断
+        rt["last_predict_info"] = f"预测方向：{'大' if prediction == 1 else '小'} - {rt['last_predict_reason']}"
+        log_event(logging.INFO, 'bet_on', '最终预测', user_id=user_ctx.user_id,
+                  data=f"prediction={prediction} ({'大' if prediction == 1 else '小'})")
+        timing_ctx = {
+            "flow_started_at": flow_started_at,
+            "prompt_wait_ms": prompt_wait_ms,
+            "predict_ms": int((time.monotonic() - _ai_started_at) * 1000) if '_ai_started_at' in dir() else 0,
+            "click_ms": 0,
+            "predict_timeout_sec": predict_timeout_sec,
+            "click_timeout_sec": click_timeout_sec,
+        }
+        await _execute_bet_flow(client, event, user_ctx, global_config, prediction, bet_amount, timing_ctx)
+        return
+    # 优先级 0: 检查是否有强制延续下注
     forced_remaining = rt.get("forced_bet_remaining", 0)
-    if forced_remaining > 0 and history and not rt.get("edb", True):
-        # edb 关闭：强制延续属于动态策略，禁用并清除遗留状态，仅按预设方向下注
-        rt["forced_bet_remaining"] = 0
-        rt["forced_bet_direction"] = 0
-        forced_remaining = 0
-        log_event(logging.INFO, 'bet_on', 'EDB关闭禁用强制延续', user_id=user_ctx.user_id,
-                  data="清除强制延续状态，仅按预设方向下注")
     if forced_remaining > 0 and history:
         forced_dir = rt.get("forced_bet_direction", history[-1])
         prediction = forced_dir
@@ -4241,8 +4370,8 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
         rt["last_predict_reason"] = f"强制延续下注 (剩余 {forced_remaining} 次)"
         log_event(logging.INFO, 'bet_on', '强制延续', user_id=user_ctx.user_id,
                   data=f"direction={prediction}, remaining={forced_remaining}")
-    # 优先级 0.5: 预设方向优先于固定规律
-    elif rt.get("bet_direction") in ("0", "1", "same", "reverse", "auto") and history:
+    # 优先级 0.5: 预设级别的固定方向设定（固定金额模式专用）
+    elif rt.get("bet_direction") in ("0", "1", "same", "reverse") and history:
         bet_direction = rt.get("bet_direction")
         if bet_direction in ("0", "1"):
             # 固定方向：0=永远下小，1=永远下大
@@ -4254,18 +4383,13 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
             rt["last_predict_reason"] = f"预设固定方向：永远下{direction_text}"
             log_event(logging.INFO, 'bet_on', '固定方向', user_id=user_ctx.user_id,
                       data=f"bet_direction={bet_direction}, prediction={prediction}")
-        elif bet_direction in ("same", "auto"):
-            # same/auto：跟随上一手（auto 即预设跟随策略）
+        elif bet_direction == "same":
+            # 同向：跟随上一手
             prediction = history[-1]
-            if bet_direction == "same":
-                rt["last_predict_source"] = "preset_same_direction"
-                rt["last_predict_tag"] = "PRESET_SAME"
-                rt["last_predict_reason"] = f"预设同向下注：跟随上一手{'大' if prediction == 1 else '小'}"
-            else:
-                rt["last_predict_source"] = "preset_follow"
-                rt["last_predict_tag"] = "PRESET_FOLLOW"
-                rt["last_predict_reason"] = f"预设跟随策略：跟随上一手{'大' if prediction == 1 else '小'}"
+            rt["last_predict_source"] = "preset_same_direction"
+            rt["last_predict_tag"] = "PRESET_SAME"
             rt["last_predict_confidence"] = 100
+            rt["last_predict_reason"] = f"预设同向下注：跟随上一手{'大' if prediction == 1 else '小'}"
             log_event(logging.INFO, 'bet_on', '预设方向', user_id=user_ctx.user_id,
                       data=f"bet_direction={bet_direction}, prediction={prediction}")
         else:  # reverse
@@ -4277,7 +4401,7 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
             rt["last_predict_reason"] = f"预设反向下注：与上一手相反{'大' if prediction == 1 else '小'}"
             log_event(logging.INFO, 'bet_on', '预设方向', user_id=user_ctx.user_id,
                       data=f"bet_direction={bet_direction}, prediction={prediction}")
-    # 优先级 1: 预设跟随（固定规律已移除）
+    # 优先级 1: 固定数据规律检测（支持 5 位和 6 位模式）
     elif history:
         if not rt.get("edb", True):
             # edb 关闭时，仅按预设逻辑（跟随上一手）
@@ -4289,13 +4413,59 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
             log_event(logging.INFO, 'bet_on', '预设跟随(EDB关闭)', user_id=user_ctx.user_id,
                       data=f"history[-1]={history[-1]}, prediction={prediction}")
         else:
-            prediction = history[-1]
-            rt["last_predict_source"] = "follow_last"
-            rt["last_predict_tag"] = "FOLLOW_TREND"
-            rt["last_predict_confidence"] = 50
-            rt["last_predict_reason"] = f"跟随上一手{history[-1]}，下{'大' if prediction == 1 else '小'}"
-            log_event(logging.INFO, 'bet_on', '跟随策略', user_id=user_ctx.user_id,
-                      data=f"history[-1]={history[-1]}, prediction={prediction}")
+            fixed_signal = _detect_fixed_pattern_signal(history)
+            if fixed_signal.get("active"):
+                prediction = fixed_signal["prediction"]
+                follow = fixed_signal.get("follow_pattern", "")
+                seq = fixed_signal.get("detected_seq", "")
+                label = fixed_signal.get("label", "固定规律")
+                duration = fixed_signal.get("duration", 1)
+
+                if duration > 1:
+                    rt["forced_bet_remaining"] = duration - 1
+                    rt["forced_bet_direction"] = prediction
+                    direction_text = "反向" if follow == "reverse" else "同向"
+                    reason = f"检测到{label}（{seq}），后续 {duration} 次{direction_text}下注{'大' if prediction == 1 else '小'}"
+                elif follow == "reverse":
+                    reason = f"检测到{label}（{seq}），反向下注{'大' if prediction == 1 else '小'}"
+                elif follow == "same":
+                    reason = f"检测到{label}（{seq}），同向下注{'大' if prediction == 1 else '小'}"
+                else:
+                    reason = f"检测到{label}（{seq}），按照规律下注{'大' if prediction == 1 else '小'}"
+
+                rt["last_predict_source"] = "fixed_pattern"
+                rt["last_predict_tag"] = "FIXED_PATTERN"
+                rt["last_predict_confidence"] = 100
+                rt["last_predict_reason"] = reason
+                log_event(logging.INFO, 'bet_on', '固定规律', user_id=user_ctx.user_id,
+                          data=f"seq={seq}, follow={follow}, prediction={prediction}")
+            # 优先级 2: 5 位纯交替打破
+            elif len(history) >= 5:
+                last_5 = "".join(str(x) for x in history[-5:])
+                if last_5 in ("10101", "01010"):
+                    prediction = 1 - history[-1]
+                    rt["last_predict_source"] = "alternation_break"
+                    rt["last_predict_tag"] = "ALTERNATION_BREAK"
+                    rt["last_predict_confidence"] = 100
+                    rt["last_predict_reason"] = f"5 位纯交替{last_5}，反向下注{'大' if prediction == 1 else '小'}"
+                    log_event(logging.INFO, 'bet_on', '交替打破', user_id=user_ctx.user_id,
+                              data=f"last_5={last_5}, history[-1]={history[-1]}, prediction={prediction}")
+                else:
+                    prediction = history[-1]
+                    rt["last_predict_source"] = "follow_last"
+                    rt["last_predict_tag"] = "FOLLOW_TREND"
+                    rt["last_predict_confidence"] = 50
+                    rt["last_predict_reason"] = f"跟随上一手{history[-1]}，下{'大' if prediction == 1 else '小'}"
+                    log_event(logging.INFO, 'bet_on', '跟随策略', user_id=user_ctx.user_id,
+                              data=f"history[-1]={history[-1]}, prediction={prediction}")
+            else:
+                prediction = history[-1]
+                rt["last_predict_source"] = "follow_last"
+                rt["last_predict_tag"] = "FOLLOW_TREND"
+                rt["last_predict_confidence"] = 50
+                rt["last_predict_reason"] = f"跟随上一手{history[-1]}，下{'大' if prediction == 1 else '小'}"
+                log_event(logging.INFO, 'bet_on', '跟随策略', user_id=user_ctx.user_id,
+                          data=f"history[-1]={history[-1]}, prediction={prediction}")
     else:
         prediction = 1
         rt["last_predict_source"] = "default"
@@ -4303,13 +4473,59 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
         rt["last_predict_confidence"] = 50
         rt["last_predict_reason"] = "无历史数据，默认下大"
     
-    prediction = _apply_dragon_extra_direction(rt, history, prediction)
     rt["last_predict_info"] = f"预测方向：{'大' if prediction == 1 else '小'} - {rt['last_predict_reason']}"
     log_event(logging.INFO, 'bet_on', '最终预测', user_id=user_ctx.user_id, 
               data=f"prediction={prediction} ({'大' if prediction == 1 else '小'})")
     
     # 简单策略总是执行下注，直接进入下注执行流程
-    
+    timing_ctx = {
+        "flow_started_at": flow_started_at,
+        "prompt_wait_ms": prompt_wait_ms,
+        "predict_ms": 0,
+        "click_ms": 0,
+        "predict_timeout_sec": predict_timeout_sec,
+        "click_timeout_sec": click_timeout_sec,
+    }
+    await _execute_bet_flow(client, event, user_ctx, global_config, prediction, bet_amount, timing_ctx)
+
+
+async def _execute_bet_flow(
+    client,
+    event,
+    user_ctx: UserContext,
+    global_config: dict,
+    prediction: int,
+    bet_amount: int,
+    timing_ctx: dict,
+):
+    """下注执行公共流程：按钮组合、点击、运行态写入、报告推送。"""
+    state = user_ctx.state
+    rt = state.runtime
+    next_sequence = timing_ctx["next_sequence"]
+    click_interval_sec = timing_ctx["click_interval_sec"]
+    click_timeout_sec = timing_ctx["click_timeout_sec"]
+
+    def _emit_bet_timing(outcome: str, **extra: Any) -> None:
+        payload = {
+            "timing_outcome": str(outcome or "").strip() or "unknown",
+            "timing_total_ms": int((time.monotonic() - timing_ctx["flow_started_at"]) * 1000),
+            "timing_prompt_wait_ms": int(timing_ctx.get("prompt_wait_ms", 0)),
+            "timing_predict_ms": int(timing_ctx.get("predict_ms", 0)),
+            "timing_click_ms": int(timing_ctx.get("click_ms", 0)),
+            "timing_predict_budget_ms": int(timing_ctx["predict_timeout_sec"] * 1000),
+            "timing_click_budget_ms": int(timing_ctx["click_timeout_sec"] * 1000),
+        }
+        if extra:
+            payload.update(extra)
+        log_event(
+            logging.INFO,
+            'bet_on',
+            '下注时序摘要',
+            user_id=user_ctx.user_id,
+            category='runtime',
+            **_build_runtime_chain_diag(rt, state, **payload),
+        )
+
     await _notify_ai_key_warning_if_needed(client, user_ctx, global_config)
 
     planned_bet_amount = int(bet_amount)
@@ -4439,8 +4655,7 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
         "result": None,
         "profit": 0,
         "lose_stop": rt.get("lose_stop", 13),
-        "profit_target": rt.get("profit", 1000000),
-        "dragon_extra": bool(rt.get("last_predict_source") == "dragon_extra"),
+        "profit_target": rt.get("profit", 1000000)
     })
     _clear_hand_stall_guard(rt)
 
@@ -4803,121 +5018,39 @@ def calculate_bet_amount(rt: dict, history: list = None) -> int:
     return base + dragon_extra
 
 
-DRAGON_EXTRA_AMOUNT = 1000000
-# 同向长龙提前一手：历史尾部 5 连同向（如 11111）时，第 6 手下注即加注。
-DRAGON_EXTRA_MIN_STREAK = 5
-# 交替长龙再延后一手：历史尾部 6 连交替（如 101010）时，第 7 手下注才加注。
-DRAGON_EXTRA_ALT_MIN_STREAK = 6
-
-
-def _clear_dragon_extra_runtime(rt: dict) -> None:
-    rt["dragon_extra_active"] = False
-    rt["dragon_tail_streak"] = 0
-    rt["dragon_extra_kind"] = ""
-    rt["dragon_extra_direction"] = None
-
-
-def _get_alternation_tail_streak(history: list) -> int:
-    """返回历史尾部纯交替长度（1010... / 0101...）。"""
-    if not isinstance(history, list) or len(history) < 2:
-        return 0
-    try:
-        streak = 1
-        for idx in range(len(history) - 1, 0, -1):
-            current = int(history[idx])
-            previous = int(history[idx - 1])
-            if current == 1 - previous:
-                streak += 1
-            else:
-                break
-        return streak
-    except Exception:
-        return 0
-
-
-def _detect_dragon_extra_signal(history: list) -> Dict[str, Any]:
-    """识别同向长龙或交替长龙，并给出额外加注方向。
-
-    同向长龙达到 DRAGON_EXTRA_MIN_STREAK 连后触发（第 6 手）；
-    交替长龙达到 DRAGON_EXTRA_ALT_MIN_STREAK 连后触发（第 7 手）。
-    """
-    min_len = min(DRAGON_EXTRA_MIN_STREAK, DRAGON_EXTRA_ALT_MIN_STREAK)
-    if not isinstance(history, list) or len(history) < min_len:
-        return {"active": False}
-
-    same_streak, same_dir = _get_history_tail_streak(history)
-    if same_streak >= DRAGON_EXTRA_MIN_STREAK:
-        return {
-            "active": True,
-            "kind": "same",
-            "streak": same_streak,
-            "direction": int(same_dir),
-        }
-
-    alt_streak = _get_alternation_tail_streak(history)
-    if alt_streak >= DRAGON_EXTRA_ALT_MIN_STREAK:
-        try:
-            latest = int(history[-1])
-        except Exception:
-            return {"active": False}
-        return {
-            "active": True,
-            "kind": "alt",
-            "streak": alt_streak,
-            "direction": 1 - latest,
-        }
-
-    return {"active": False}
-
-
-def _apply_dragon_extra_direction(rt: dict, history: list, prediction: int) -> int:
-    """同向长龙额外押同向；交替长龙额外押交替。"""
-    if not rt.get("edb", True):
-        return int(prediction)
-    if not rt.get("dragon_extra_active", False):
-        _get_dragon_extra_bet_amount(rt, history)
-    if not rt.get("dragon_extra_active", False):
-        return int(prediction)
-
-    direction = rt.get("dragon_extra_direction")
-    if direction not in (0, 1):
-        return int(prediction)
-
-    forced = int(direction)
-    kind = str(rt.get("dragon_extra_kind", "") or "")
-    kind_text = "同向" if kind == "same" else "交替"
-    side_text = "大" if forced == 1 else "小"
-    rt["last_predict_source"] = "dragon_extra"
-    rt["last_predict_tag"] = "DRAGON_EXTRA"
-    rt["last_predict_confidence"] = 100
-    rt["last_predict_reason"] = f"{kind_text}长龙额外加注，押{side_text}"
-    return forced
-
-
 def _get_dragon_extra_bet_amount(rt: dict, history: list = None) -> int:
-    """同向/交替长龙期间每次额外加 1000000；赢了继续，不中后停止。edb 关闭时禁用。
-
-    同向长龙需 5 连（第 6 手加注），交替长龙需 6 连（第 7 手加注）。
-    """
+    """5 连以上长龙期间，每次下注额外加 1000000，直到不中后停止。edb 关闭时禁用。"""
     if not rt.get("edb", True):
-        _clear_dragon_extra_runtime(rt)
+        return 0
+    if rt.get("lose_count", 0) > 0:
+        rt["dragon_extra_active"] = False
+        rt["dragon_tail_streak"] = 0
+        # 不中时清除强制延续状态
+        rt["forced_bet_remaining"] = 0
+        rt["forced_bet_direction"] = 0
         return 0
 
     if history is None:
-        if rt.get("dragon_extra_active", False):
-            return DRAGON_EXTRA_AMOUNT
+        history = rt.get("_current_history", [])
+        if not history:
+            history = rt.get("_history_cache", [])
+    else:
+        rt["_history_cache"] = history
+
+    if not isinstance(history, list) or len(history) < 5:
+        rt["dragon_extra_active"] = False
         return 0
 
-    rt["_history_cache"] = history
-    signal = _detect_dragon_extra_signal(history)
-    if signal.get("active"):
-        rt["dragon_extra_active"] = True
-        rt["dragon_tail_streak"] = int(signal.get("streak", 0) or 0)
-        rt["dragon_extra_kind"] = str(signal.get("kind", "") or "")
-        rt["dragon_extra_direction"] = int(signal.get("direction", 0) or 0)
-        return DRAGON_EXTRA_AMOUNT
+    streak, _ = _get_history_tail_streak(history)
 
-    _clear_dragon_extra_runtime(rt)
+    if streak >= 5:
+        rt["dragon_extra_active"] = True
+        rt["dragon_tail_streak"] = streak
+        return 1000000
+
+    if rt.get("dragon_extra_active", False):
+        return 1000000
+
     return 0
 
 
@@ -5843,6 +5976,52 @@ async def _trigger_deep_risk_pause_after_settle(
     return True
 
 
+async def _handle_fixed_bet_auto_pause_after_settle(
+    client,
+    user_ctx: UserContext,
+    global_config: dict,
+) -> bool:
+    """处理固定金额模式连输自动暂停后的通知。"""
+    rt = user_ctx.state.runtime
+    
+    # 检查是否触发了自动暂停
+    if not rt.get("auto_pause_triggered", False):
+        return False
+    
+    auto_pause_count = int(rt.get("auto_pause_count", 0) or 0)
+    lose_count = int(rt.get("auto_pause_lose_count", 0) or 0)
+    
+    if auto_pause_count <= 0 or lose_count <= 0:
+        # 清除触发标记
+        rt["auto_pause_triggered"] = False
+        rt.pop("auto_pause_lose_count", None)
+        return False
+    
+    # 设置暂停
+    _enter_pause(rt, auto_pause_count, f"固定金额模式连输{lose_count}局自动暂停")
+    rt["bet_on"] = False
+    rt["mode_stop"] = True
+    
+    # 清除触发标记
+    rt["auto_pause_triggered"] = False
+    rt.pop("auto_pause_lose_count", None)
+    
+    resume_hint = _build_pause_resume_hint(rt)
+    pause_msg = (
+        f"⛔ 固定金额模式自动暂停 ⛔\n\n"
+        f"触发原因：连输{lose_count}局达到暂停阈值\n"
+        f"暂停局数：{auto_pause_count} 局\n"
+        f"暂停期间：不重置连输计数，保持当前状态\n"
+        f"{resume_hint}"
+    )
+    
+    await send_message_v2(client, "pause", pause_msg, user_ctx, global_config)
+    log_event(logging.INFO, 'settle', '固定金额模式连输暂停', user_id=user_ctx.user_id,
+              data=f"连输{lose_count}局，暂停{auto_pause_count}局")
+    
+    return True
+
+
 async def _handle_goal_pause_after_settle(
     client,
     user_ctx: UserContext,
@@ -6330,7 +6509,7 @@ async def _process_settle_slim(client, event, user_ctx: UserContext, global_conf
             rt["account_balance"] = await fetch_balance(user_ctx)
             rt["balance_status"] = "success"
         except Exception as e:
-            log_event(logging.WARNING, 'settle', '获取账户余额失败，使用默认值', user_id=user_ctx.user_id, data=str(e))
+            log_event(logging.WARNING, 'settle', '鑾峰彇璐︽埛浣欓澶辫触锛屼娇鐢ㄩ粯璁ゅ€?', user_id=user_ctx.user_id, data=str(e))
             rt["balance_status"] = "network_error"
 
         state.history.append(result)
@@ -6433,11 +6612,11 @@ async def _process_settle_slim(client, event, user_ctx: UserContext, global_conf
                     int(active_chain_summary.get("lose_count", 0)),
                     int(old_lose_count) + 1,
                 )
-                # 长龙额外加注不中后停止，重置倍投，下一手按预设初始金额下注
+                # 长龙额外加注不中后，按默认金额下注
                 if rt.get("dragon_extra_active", False):
                     rt["bet_amount"] = int(rt.get("initial_amount", 500))
-                    rt["lose_count"] = 0
-                    _clear_dragon_extra_runtime(rt)
+                    rt["dragon_extra_active"] = False
+                    rt["dragon_tail_streak"] = 0
                 else:
                     rt["bet_amount"] = int(active_chain_summary.get("last_amount", bet_amount) or bet_amount)
 
@@ -6563,6 +6742,9 @@ async def _process_settle_slim(client, event, user_ctx: UserContext, global_conf
 
         if len(state.history) % 5 == 0:
             user_ctx.save_state()
+
+        # 固定金额模式连输自动暂停通知（在 goal pause 之前处理）
+        await _handle_fixed_bet_auto_pause_after_settle(client, user_ctx, global_config)
 
         await _handle_goal_pause_after_settle(client, user_ctx, global_config)
 
@@ -7451,6 +7633,9 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 # 读取方向参数（第 8 个参数，可选）
                 bet_direction = preset[7] if len(preset) > 7 else "auto"
                 rt["bet_direction"] = bet_direction
+                # 读取自动暂停参数（第 9 个参数，固定金额模式连输 n 局后暂停 n 局）
+                auto_pause_count = int(preset[8]) if len(preset) > 8 else 0
+                rt["auto_pause_count"] = auto_pause_count
                 await _clear_pause_countdown_notice(client, user_ctx)
                 rt["switch"] = True
                 rt["manual_pause"] = False
@@ -7497,74 +7682,6 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                     user_ctx,
                     global_config,
                 )
-            return
-        
-        # mt - 切换预设并开启交替模式（反向下注） - 兼容 v2.0.3
-        if cmd == "mt":
-            preset_name = my[1] if len(my) > 1 else rt.get("current_preset_name", "")
-
-            if preset_name and preset_name in presets:
-                preset = presets[preset_name]
-                rt["continuous"] = int(preset[0])
-                rt["lose_stop"] = int(preset[1])
-                rt["lose_once"] = float(preset[2])
-                rt["lose_twice"] = float(preset[3])
-                rt["lose_three"] = float(preset[4])
-                rt["lose_four"] = float(preset[5])
-                rt["initial_amount"] = int(preset[6])
-                rt["current_preset_name"] = preset_name
-                rt["bet_amount"] = int(preset[6])
-                rt["lose_count"] = 0
-                rt["win_count"] = 0
-                rt["bet_sequence_count"] = 0
-                await _clear_pause_countdown_notice(client, user_ctx)
-                rt["risk_deep_triggered_milestones"] = []
-                rt["fund_pause_notified"] = False
-                rt["limit_stop_notified"] = False
-                _clear_lose_recovery_tracking(rt)
-            elif len(my) > 1 and preset_name not in presets:
-                preset_list = ", ".join(presets.keys())
-                mes = _build_ops_card(
-                    "❌ 预设不存在",
-                    summary=f"可用预设：{preset_list}",
-                    action="使用 `/mt [预设名]` 切换预设并开启交替模式。",
-                )
-                await send_to_admin(client, mes, user_ctx, global_config)
-                return
-
-            # 设置 bet_direction 为 reverse，实现反向下注（交替模式）
-            rt["bet_direction"] = "reverse"
-            rt["switch"] = True
-            rt["manual_pause"] = False
-            rt["bet_on"] = True
-            rt["mode_stop"] = True
-            rt["bet"] = False  # mt 命令不直接设置 bet=True，等待真实盘口触发下注
-            user_ctx.save_state()
-
-            current_preset = rt.get("current_preset_name", "") or "未设置"
-            extra_line = "开启（长龙或交替形态触发时 +100 万）" if rt.get("edb", True) else "已关闭"
-
-            fields = [
-                ("下注方向", "反向（开 1 押 0，开 0 押 1）"),
-                ("当前预设", current_preset),
-            ]
-            if current_preset != "未设置" and current_preset in presets:
-                p = presets[current_preset]
-                fields.append(("策略参数", f"{p[0]} {p[1]} {p[2]} {p[3]} {p[4]} {p[5]} {p[6]}"))
-            fields.append(("长龙加注", extra_line))
-
-            mes = _build_ops_card(
-                "✅ 已切换到交替模式",
-                summary="当前账号已切换到反向下注模式，后续按反向方向进入可下注状态。",
-                fields=fields,
-                action="建议执行 `status` 确认当前状态；执行 `yss` 查看所有预设的完整倍投序列。",
-            )
-            message = await send_to_admin(client, mes, user_ctx, global_config)
-            asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
-            if message:
-                asyncio.create_task(delete_later(client, message.chat_id, message.id, 10))
-            log_event(logging.INFO, 'user_cmd', 'mt', user_id=user_ctx.user_id,
-                      data=f"mode=alternation, direction=reverse, preset={current_preset}")
             return
         
         # stats - 查看连大、连小、连输统计
@@ -8178,92 +8295,40 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
             return
         
         # ========== 预设管理命令 ==========
-        # ys - 保存预设（兼容 v2.0.3 的 `ys 替换/删除` 格式）
-        if cmd == "ys":
-            sub_action = my[1].lower() if len(my) > 1 else ""
-            if sub_action in ("删除", "del", "delete", "rm"):
-                # v2.0.3 格式：ys 删除 [预设名]
-                if len(my) < 3:
-                    await send_to_admin(
-                        client,
-                        _build_ops_card(
-                            "❌ 预设删除失败",
-                            summary="缺少预设名称。",
-                            action="请执行 `ys 删除 [预设名]`，例如 `ys 删除 1w`。",
-                        ),
-                        user_ctx,
-                        global_config,
-                    )
-                    return
-                preset_name = my[2]
-                if preset_name in presets:
-                    del presets[preset_name]
-                    user_ctx.save_presets()
-                    mes = _build_ops_card(
-                        f"✅ 预设删除成功: {preset_name}",
-                        summary="该预设已经从当前账号配置中移除。",
-                        action="建议执行 `yss` 再确认剩余预设。",
-                    )
-                    log_event(logging.INFO, 'user_cmd', '删除预设', user_id=user_ctx.user_id, preset=preset_name)
-                else:
-                    mes = _build_ops_card(
-                        "❌ 预设删除失败",
-                        summary="目标预设不存在或命令格式不正确。",
-                        action="请先执行 `yss` 查看当前预设名称，再执行 `ys 删除 [名]`。",
-                    )
-                    log_event(logging.WARNING, 'user_cmd', '删除预设失败', user_id=user_ctx.user_id, cmd=text)
+        # ys - 保存预设 - 与master一致
+        if cmd == "ys" and len(my) >= 9:
+            try:
+                preset_name = my[1]
+                ys = [int(my[2]), int(my[3]), float(my[4]), float(my[5]), float(my[6]), float(my[7]), int(my[8])]
+                presets[preset_name] = ys
+                user_ctx.save_presets()
+                rt["current_preset_name"] = preset_name
+                user_ctx.save_state()
+                mes = _build_ops_card(
+                    f"✅ 预设保存成功: {preset_name}",
+                    summary="新的预设参数已经写入当前账号，并设置为当前预设。",
+                    fields=[("策略参数", f"{ys[0]} {ys[1]} {ys[2]} {ys[3]} {ys[4]} {ys[5]} {ys[6]}")],
+                    action=f"建议执行 `st {preset_name}` 或 `status` 确认当前状态。",
+                )
+                log_event(logging.INFO, 'user_cmd', '保存预设策略', user_id=user_ctx.user_id, preset=preset_name, params=ys)
                 message = await send_to_admin(client, mes, user_ctx, global_config)
                 asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
                 if message:
                     asyncio.create_task(delete_later(client, message.chat_id, message.id, 10))
-                return
-
-            # v2.0.3 格式 `ys 替换 [预设名] ...` 时跳过第一个子命令
-            param_offset = 1 if sub_action in ("替换", "replace", "set", "update") else 0
-            if len(my) >= 9 + param_offset:
-                try:
-                    preset_name = my[1 + param_offset]
-                    ys = [
-                        int(my[2 + param_offset]),
-                        int(my[3 + param_offset]),
-                        float(my[4 + param_offset]),
-                        float(my[5 + param_offset]),
-                        float(my[6 + param_offset]),
-                        float(my[7 + param_offset]),
-                        int(my[8 + param_offset]),
-                    ]
-                    # v2.0.3 可选参数：押注方向
-                    if param_offset == 1:
-                        if len(my) > 10:
-                            ys.append(my[10])
-                    presets[preset_name] = ys
-                    user_ctx.save_presets()
-                    rt["current_preset_name"] = preset_name
-                    user_ctx.save_state()
-                    mes = _build_ops_card(
-                        f"✅ 预设保存成功: {preset_name}",
-                        summary="新的预设参数已经写入当前账号，并设置为当前预设。",
-                        fields=[("策略参数", f"{ys[0]} {ys[1]} {ys[2]} {ys[3]} {ys[4]} {ys[5]} {ys[6]}")],
-                        action=f"建议执行 `st {preset_name}` 或 `status` 确认当前状态。",
-                    )
-                    log_event(logging.INFO, 'user_cmd', '保存预设策略', user_id=user_ctx.user_id, preset=preset_name, params=ys)
-                    message = await send_to_admin(client, mes, user_ctx, global_config)
-                    asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
-                    if message:
-                        asyncio.create_task(delete_later(client, message.chat_id, message.id, 10))
-                except (ValueError, IndexError) as e:
-                    await send_to_admin(
-                        client,
-                        _build_ops_card(
-                            "❌ 预设保存失败",
-                            summary="参数格式不正确，当前预设没有写入。",
-                            fields=[("错误", str(e)[:180])],
-                            action="请按 `ys [名] [连续] [停] [倍1] [倍2] [倍3] [倍4] [首注]` 或 `ys 替换 [名] ...` 的格式重新输入完整参数。",
-                        ),
-                        user_ctx,
-                        global_config,
-                    )
-                return
+            except (ValueError, IndexError) as e:
+                await send_to_admin(
+                    client,
+                    _build_ops_card(
+                        "❌ 预设保存失败",
+                        summary="参数格式不正确，当前预设没有写入。",
+                        fields=[("错误", str(e)[:180])],
+                        action="请按 `ys [名] ...` 的格式重新输入完整参数。",
+                    ),
+                    user_ctx,
+                    global_config,
+                )
+            return
+        if cmd == "ys":
             await send_to_admin(
                 client,
                 _build_ops_card(
@@ -8284,7 +8349,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 user_ctx.save_state()
                 mes = _build_ops_card(
                     "🐉 长龙增强已开启",
-                    summary="固定规律检测、长龙额外加注均已启用。",
+                    summary="固定规律检测、交替打破、长龙额外加注均已启用。",
                     action="执行 `status` 可确认当前状态。",
                 )
                 log_event(logging.INFO, 'user_cmd', 'EDB已开启', user_id=user_ctx.user_id)
@@ -8293,7 +8358,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 user_ctx.save_state()
                 mes = _build_ops_card(
                     "🐉 长龙增强已关闭",
-                    summary="已禁用固定规律检测和长龙额外加注，仅按预设方向下注。",
+                    summary="已禁用固定规律检测、交替打破和长龙额外加注，仅按预设方向下注。",
                     action="执行 `status` 可确认当前状态。",
                 )
                 log_event(logging.INFO, 'user_cmd', 'EDB已关闭', user_id=user_ctx.user_id)
@@ -8302,7 +8367,7 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 state_text = "开启" if current else "关闭"
                 mes = _build_ops_card(
                     f"🐉 长龙增强状态：{state_text}",
-                    summary="长龙增强控制固定规律检测和长龙额外加注。",
+                    summary="长龙增强控制固定规律检测、交替打破和长龙额外加注。",
                     fields=[("当前状态", state_text)],
                     action="执行 `edb on` 开启，`edb off` 关闭。",
                 )
@@ -8312,8 +8377,8 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 asyncio.create_task(delete_later(client, message.chat_id, message.id, 10))
             return
 
-        # yss/ysz - 查看/删除预设（ysz 为兼容 2.0.3 的别名）
-        if cmd in ("yss", "ysz"):
+        # yss - 查看/删除预设 - 与master一致
+        if cmd == "yss":
             if len(my) > 2 and my[1] == "dl":
                 # 删除预设
                 preset_name = my[2]
@@ -8337,84 +8402,6 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
                 asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
                 if message:
                     asyncio.create_task(delete_later(client, message.chat_id, message.id, 10))
-            elif len(my) > 1:
-                # 查看指定预设详情（兼容 v2.0.3 的 `ysz [预设名]`）
-                target_preset = my[1]
-                if target_preset not in presets:
-                    preset_list = ", ".join(sorted(presets.keys()))
-                    mes = _build_ops_card(
-                        f"❌ 预设不存在：{target_preset}",
-                        summary="没有找到同名预设。",
-                        fields=[("可用预设", preset_list or "无")],
-                        action="执行 `yss` 查看全部预设，或 `yss [预设名]` 查看指定预设。",
-                    )
-                else:
-                    try:
-                        params = presets[target_preset]
-                        base = int(params[6])
-                        multipliers = [float(params[2]), float(params[3]), float(params[4]), float(params[5])]
-                        lose_stop = int(params[1])
-                        bet_direction = str(params[7]) if len(params) > 7 else "auto"
-
-                        # 计算连续倍投的每一手金额和累计所需资金
-                        hand_lines = []
-                        current = base
-                        total_needed = 0
-                        for i in range(1, lose_stop + 1):
-                            if i == 1:
-                                current = base
-                                label = "首注"
-                            elif i <= 5:
-                                mult = multipliers[i - 2]
-                                current = int(current * mult)
-                                label = f"×{mult} 倍"
-                            else:
-                                current = int(current * multipliers[-1])
-                                label = "持续倍投"
-                            total_needed += current
-                            hand_lines.append(
-                                f"├ 第{i:2d}手：{_format_money_message(current):>10}（累计：{_format_money_message(total_needed):>10}）{label}"
-                            )
-
-                        if hand_lines:
-                            hand_lines[-1] = hand_lines[-1].replace("├", "└", 1)
-
-                        direction_label = {
-                            "same": "同向",
-                            "reverse": "反向",
-                            "auto": "跟随策略",
-                            "0": "固定下小",
-                            "1": "固定下大",
-                        }.get(bet_direction, bet_direction)
-                        extra_bet_state = "开启（同向 5 连 / 交替 6 连时 +100 万）" if rt.get("edb", True) else "已关闭"
-
-                        mes = (
-                            f"【 {target_preset} 预设详情 】\n"
-                            f"最多连投：{lose_stop:2d} 手\n\n"
-                            f"💵 倍投计划\n"
-                            + "\n".join(hand_lines) +
-                            f"\n\n💰 总需资金：{_format_money_message(total_needed)}\n\n"
-                            f"⚙️ 策略参数\n"
-                            f"初始金额：{_format_money_message(base)}\n"
-                            f"押注倍率：{multipliers[0]} / {multipliers[1]} / {multipliers[2]} / {multipliers[3]}\n"
-                            f"押注方向：{direction_label}\n"
-                            f"长龙加注：{extra_bet_state}\n\n"
-                            f"💡 说明\n"
-                            f"• 第 1 手为首注，第 2 手起基于前一手金额连续倍投\n"
-                            f"• 每输一手按倍率递增，总风险为总需资金"
-                        )
-                    except (ValueError, IndexError, TypeError) as e:
-                        mes = _build_ops_card(
-                            "❌ 预设详情解析失败",
-                            summary="该预设参数格式异常，无法计算倍投计划。",
-                            fields=[("错误", str(e)[:180])],
-                            action="可执行 `ys [名] ...` 重新保存该预设。",
-                        )
-                log_event(logging.INFO, 'user_cmd', '查看预设详情', user_id=user_ctx.user_id, preset=target_preset)
-                message = await send_to_admin(client, mes, user_ctx, global_config)
-                asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
-                if message:
-                    asyncio.create_task(delete_later(client, message.chat_id, message.id, 120))
             else:
                 # 查看所有预设
                 if len(presets) > 0:
