@@ -1907,11 +1907,18 @@ def _build_help_card() -> str:
         "<i>例：/stf 100</i>\n"
         "• <code>/wlc [n]</code> 连输相关阈值\n\n"
         "<b>🤖 模型与策略（进阶）</b>\n"
+        "• <code>/aib [on/off]</code> AI智能下注开关：on=大模型判断方向，off=预设规律下注\n"
         "• <code>/mfb [on/off]</code> 模型链异常时是否继续统计兜底下注\n"
         "• <code>/edb [on/off]</code> 长龙增强开关（规律检测/长龙加注）\n"
         "• <code>/model list</code> 查看可用模型\n"
         "• <code>/model select [编号/ID]</code> 切换模型（支持编号）\n"
         "<i>例：/model select 1</i>\n"
+        "• <code>/model url [地址]</code> 设置 OpenAI 兼容接口地址\n"
+        "<i>例：/model url https://api.openai.com/v1</i>\n"
+        "• <code>/model add [模型ID] [备注]</code> 手动添加模型\n"
+        "<i>例：/model add gpt-4o-mini</i>\n"
+        "• <code>/model del [编号/ID]</code> 删除模型\n"
+        "• <code>/model show</code> 查看当前接口配置\n"
         "• <code>/apikey show</code> 查看当前密钥状态\n"
         "• <code>/apikey set</code> / <code>/apikey add</code> / <code>/apikey del</code> 管理密钥\n\n"
         "<b>📋 预设与测算（进阶）</b>\n"
@@ -3718,7 +3725,7 @@ Return JSON only:
         rt["last_predict_gap"] = int(gap)
         rt["last_predict_long_term_gap"] = float(long_term_gap)
         rt["last_predict_tail_len"] = int(tail_streak_len)
-        rt["last_predict_tail_char"] = int(tail_streak_char)
+        rt["last_predict_tail_char"] = int(tail_streak_char) if tail_streak_char is not None else 0
         rt["last_predict_info"] = _build_predict_basis_text(
             history=history,
             prediction=int(prediction),
@@ -4184,6 +4191,37 @@ async def _process_bet_on_slim(client, event, user_ctx: UserContext, global_conf
     log_event(logging.INFO, 'bet_on', '策略诊断', user_id=user_ctx.user_id, 
               data=f"历史：{history[-10:]}, 最后一手：{history[-1] if history else '无'}")
     
+    # 优先级 -1: AI 智能下注开关开启时，由大模型决定方向（aib on）
+    if bool(rt.get("ai_bet_enabled", False)):
+        ai_prediction = await predict_next_bet_core(user_ctx, global_config, current_round=next_sequence)
+        ai_source = str(rt.get("last_predict_source", "") or "")
+        if int(ai_prediction) == -1 or ai_source in MODEL_WAIT_SOURCES:
+            rt["bet"] = False
+            user_ctx.save_state()
+            log_event(
+                logging.INFO,
+                'bet_on',
+                'AI判断观望，本局跳过',
+                user_id=user_ctx.user_id,
+                data=f"source={ai_source}, reason={rt.get('last_predict_reason', '')}"
+            )
+            await _send_transient_admin_notice(
+                client,
+                user_ctx,
+                global_config,
+                _build_ops_card(
+                    "⏭️ AI判断观望，本局未下注",
+                    summary=str(rt.get("last_predict_reason", "") or "模型建议观望"),
+                    fields=[("判断来源", ai_source or "model")],
+                ),
+                ttl_seconds=90,
+                attr_name="skip_reason_message",
+                msg_type="skip_notice",
+            )
+            return
+        prediction = int(ai_prediction)
+        log_event(logging.INFO, 'bet_on', 'AI智能下注', user_id=user_ctx.user_id,
+                  data=f"prediction={prediction}, confidence={rt.get('last_predict_confidence')}")
     # 优先级 0: 检查是否有强制延续下注（edb 关闭时禁用，仅按预设方向下注）
     forced_remaining = rt.get("forced_bet_remaining", 0)
     if forced_remaining > 0 and history and not rt.get("edb", True):
@@ -6632,6 +6670,267 @@ async def handle_model_command_multiuser(client, event, args, user_ctx: UserCont
             sub_cmd = "select"
             args = ["select", args[1]]
 
+    if sub_cmd in ["url", "baseurl", "base_url"]:
+        if len(args) < 2:
+            await _send_command_ops_card(
+                client,
+                event,
+                user_ctx,
+                global_config,
+                "❌ 缺少地址参数",
+                summary="当前没有提供新的 API 地址。",
+                action="请执行 `model url <base_url>`，例如 `model url https://api.openai.com/v1`。",
+            )
+            return
+
+        new_url = str(args[1]).strip().rstrip("/")
+        if not new_url.startswith(("http://", "https://")):
+            await _send_command_ops_card(
+                client,
+                event,
+                user_ctx,
+                global_config,
+                "❌ 地址格式错误",
+                summary="API 地址必须以 http:// 或 https:// 开头。",
+                action="请执行 `model url <base_url>` 重新设置。",
+            )
+            return
+
+        ai_cfg = user_ctx.config.ai if isinstance(user_ctx.config.ai, dict) else {}
+        new_ai = dict(ai_cfg)
+        new_ai["base_url"] = new_url
+        try:
+            config_path = user_ctx.update_ai_config(new_ai)
+            user_ctx.get_model_manager().load_models()
+            await _send_command_ops_card(
+                client,
+                event,
+                user_ctx,
+                global_config,
+                "✅ API 地址已更新",
+                summary="新的兼容接口地址已写入配置并重新加载。",
+                fields=[
+                    ("文件", f"`{os.path.basename(config_path)}`"),
+                    ("base_url", f"`{new_url}`"),
+                ],
+                action="如需添加模型，请执行 `model add <model_id>`。",
+            )
+            log_event(logging.INFO, 'model', '更新 API 地址', user_id=user_ctx.user_id, data=new_url)
+        except Exception as e:
+            log_event(logging.ERROR, 'model', '写入 API 地址失败', user_id=user_ctx.user_id, error=str(e))
+            await _send_command_ops_card(
+                client,
+                event,
+                user_ctx,
+                global_config,
+                "❌ API 地址更新失败",
+                summary="本次写入配置没有完成。",
+                fields=[("错误", str(e)[:160])],
+                action="建议检查配置文件权限后再重试。",
+            )
+        return
+
+    if sub_cmd in ["add", "create"]:
+        if len(args) < 2:
+            await _send_command_ops_card(
+                client,
+                event,
+                user_ctx,
+                global_config,
+                "❌ 缺少模型参数",
+                summary="当前没有提供要添加的模型 ID。",
+                action="请执行 `model add <model_id> [备注名]`。",
+            )
+            return
+
+        new_model_id = str(args[1]).strip()
+        new_model_name = str(args[2]).strip() if len(args) >= 3 else new_model_id
+        if not new_model_id:
+            await _send_command_ops_card(
+                client,
+                event,
+                user_ctx,
+                global_config,
+                "❌ 模型 ID 不能为空",
+                summary="当前输入的模型 ID 为空。",
+                action="请执行 `model add <model_id> [备注名]`。",
+            )
+            return
+
+        ai_cfg = user_ctx.config.ai if isinstance(user_ctx.config.ai, dict) else {}
+        models = ai_cfg.get("models", {}) if isinstance(ai_cfg.get("models"), dict) else {}
+        if any(str(m.get("model_id")) == new_model_id for m in models.values() if isinstance(m, dict)):
+            await _send_command_ops_card(
+                client,
+                event,
+                user_ctx,
+                global_config,
+                "⚠️ 模型已存在",
+                summary=f"模型 `{new_model_id}` 已经在当前账号配置中。",
+                action="如需切换，请执行 `model select <编号或ID>`。",
+            )
+            return
+
+        new_models = dict(models)
+        next_idx = 1
+        while str(next_idx) in new_models:
+            next_idx += 1
+        new_models[str(next_idx)] = {"model_id": new_model_id, "name": new_model_name, "enabled": True}
+
+        new_ai = dict(ai_cfg)
+        new_ai["models"] = new_models
+        chain = [str(x) for x in (new_ai.get("fallback_chain") or []) if str(x) in new_models]
+        chain.append(str(next_idx))
+        new_ai["fallback_chain"] = chain
+        try:
+            config_path = user_ctx.update_ai_config(new_ai)
+            model_mgr = user_ctx.get_model_manager()
+            model_mgr.load_models()
+            if not rt.get("current_model_id"):
+                rt["current_model_id"] = new_model_id
+                user_ctx.save_state()
+            await _send_command_ops_card(
+                client,
+                event,
+                user_ctx,
+                global_config,
+                "✅ 模型已添加",
+                summary="新模型已写入配置并加入降级链。",
+                fields=[
+                    ("文件", f"`{os.path.basename(config_path)}`"),
+                    ("模型", f"`{new_model_id}`"),
+                    ("配置序号", str(next_idx)),
+                ],
+                action="可执行 `model select " + str(next_idx) + "` 切换到该模型。",
+            )
+            log_event(logging.INFO, 'model', '添加模型', user_id=user_ctx.user_id, data=new_model_id)
+        except Exception as e:
+            log_event(logging.ERROR, 'model', '添加模型失败', user_id=user_ctx.user_id, error=str(e))
+            await _send_command_ops_card(
+                client,
+                event,
+                user_ctx,
+                global_config,
+                "❌ 模型添加失败",
+                summary="本次写入配置没有完成。",
+                fields=[("错误", str(e)[:160])],
+                action="建议检查配置文件权限后再重试。",
+            )
+        return
+
+    if sub_cmd in ["del", "rm", "remove"]:
+        if len(args) < 2:
+            await _send_command_ops_card(
+                client,
+                event,
+                user_ctx,
+                global_config,
+                "❌ 缺少模型参数",
+                summary="当前没有提供要删除的模型编号或 ID。",
+                action="请执行 `model del <编号或model_id>`。",
+            )
+            return
+
+        ai_cfg = user_ctx.config.ai if isinstance(user_ctx.config.ai, dict) else {}
+        models = ai_cfg.get("models", {}) if isinstance(ai_cfg.get("models"), dict) else {}
+        if not models:
+            await _send_command_ops_card(
+                client,
+                event,
+                user_ctx,
+                global_config,
+                "❌ 没有可删除的模型",
+                summary="当前账号配置中没有任何模型。",
+                action="请先执行 `model add <model_id>` 添加模型。",
+            )
+            return
+
+        target = str(args[1]).strip()
+        target_key = None
+        if target.isdigit() and target in models:
+            target_key = target
+        else:
+            for k, m in models.items():
+                if isinstance(m, dict) and str(m.get("model_id")) == target:
+                    target_key = str(k)
+                    break
+        if target_key is None:
+            await _send_command_ops_card(
+                client,
+                event,
+                user_ctx,
+                global_config,
+                "❌ 模型不存在",
+                summary=f"模型 `{target}` 不在当前账号配置中。",
+                action="请先执行 `model list` 确认当前模型。",
+            )
+            return
+
+        removed_model_id = str(models[target_key].get("model_id", target))
+        new_models = {k: v for k, v in models.items() if str(k) != target_key}
+        new_ai = dict(ai_cfg)
+        new_ai["models"] = new_models
+        chain = [str(x) for x in (new_ai.get("fallback_chain") or []) if str(x) in new_models]
+        new_ai["fallback_chain"] = chain
+        try:
+            config_path = user_ctx.update_ai_config(new_ai)
+            user_ctx.get_model_manager().load_models()
+            current_model_id = rt.get("current_model_id", "")
+            switch_msg = ""
+            if current_model_id == removed_model_id:
+                remaining = [str(m.get("model_id")) for m in new_models.values() if isinstance(m, dict)]
+                rt["current_model_id"] = remaining[0] if remaining else ""
+                user_ctx.save_state()
+                switch_msg = "当前模型被删除，已切换到 " + (rt["current_model_id"] or "空") + "。"
+            await _send_command_ops_card(
+                client,
+                event,
+                user_ctx,
+                global_config,
+                "✅ 模型已删除",
+                summary=switch_msg or f"模型 `{removed_model_id}` 已从当前账号配置中移除。",
+                fields=[
+                    ("文件", f"`{os.path.basename(config_path)}`"),
+                    ("剩余模型数量", len(new_models)),
+                ],
+                action="如需确认，请执行 `model list`。",
+            )
+            log_event(logging.INFO, 'model', '删除模型', user_id=user_ctx.user_id, data=removed_model_id)
+        except Exception as e:
+            log_event(logging.ERROR, 'model', '删除模型失败', user_id=user_ctx.user_id, error=str(e))
+            await _send_command_ops_card(
+                client,
+                event,
+                user_ctx,
+                global_config,
+                "❌ 模型删除失败",
+                summary="本次写入配置没有完成。",
+                fields=[("错误", str(e)[:160])],
+                action="建议检查配置文件权限后再重试。",
+            )
+        return
+
+    if sub_cmd in ["show", "config"]:
+        ai_cfg = user_ctx.config.ai if isinstance(user_ctx.config.ai, dict) else {}
+        keys = _normalize_ai_keys(ai_cfg)
+        base_url = str(ai_cfg.get("base_url", "") or "未设置")
+        chain = ", ".join(str(x) for x in (ai_cfg.get("fallback_chain") or [])) or "未设置"
+        await _send_command_ops_card(
+            client,
+            event,
+            user_ctx,
+            global_config,
+            "⚙️ 当前 AI 兼容接口配置",
+            summary="当前账号的 OpenAI 兼容接口配置。",
+            fields=[
+                ("base_url", f"`{base_url}`"),
+                ("key 数量", len(keys)),
+                ("降级链", f"`{chain}`"),
+            ],
+            action="可执行 `model url <base_url>` / `model add <model_id>` 修改。",
+        )
+        return
+
     if sub_cmd == "list":
         models = user_ctx.config.ai.get("models", {})
         entries = []
@@ -6740,7 +7039,7 @@ async def handle_model_command_multiuser(client, event, args, user_ctx: UserCont
             global_config,
             "❓ 未知模型命令",
             summary="当前子命令无法识别。",
-            fields=[("用法", "`model list`\n`model select <id>`")],
+            fields=[("用法", "`model list`\n`model select <id>`\n`model url <base_url>`\n`model add <model_id> [备注]`\n`model del <编号或ID>`\n`model show`")],
             action="建议先执行 `model list` 查看当前可用模型。",
         )
 
@@ -7453,6 +7752,61 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
             asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
             if message:
                 asyncio.create_task(delete_later(client, message.chat_id, message.id, 10))
+            return
+
+        if cmd == "aib":
+            current_enabled = bool(rt.get("ai_bet_enabled", False))
+            if len(my) == 1:
+                state_text = "开启" if current_enabled else "关闭"
+                mode_text = (
+                    "每局由 AI 大模型判断方向，模型观望/异常时跳过本局"
+                    if current_enabled
+                    else "使用预设规律下注（固定规律/交替打破/跟随上一手）"
+                )
+                mes = _build_ops_card(
+                    "📌 AI智能下注开关",
+                    fields=[
+                        ("当前状态", state_text),
+                        ("当前模式", mode_text),
+                    ],
+                    action="执行 `aib on` 切到 AI 判断下注，`aib off` 切回预设下注。",
+                )
+            elif len(my) == 2 and my[1].lower() in {"on", "off"}:
+                enabled = my[1].lower() == "on"
+                try:
+                    rt["ai_bet_enabled"] = enabled
+                    user_ctx.save_state()
+                    mes = _build_ops_card(
+                        f"✅ AI智能下注开关已{'开启' if enabled else '关闭'}",
+                        summary=(
+                            "当前策略：每局由 AI 大模型判断方向，模型观望或异常时跳过本局"
+                            if enabled
+                            else "当前策略：使用预设规律下注（固定规律/交替打破/跟随上一手）"
+                        ),
+                    )
+                    log_event(
+                        logging.INFO,
+                        'user_cmd',
+                        '设置AI智能下注开关',
+                        user_id=user_ctx.user_id,
+                        enabled=enabled,
+                    )
+                except Exception as e:
+                    mes = _build_ops_card(
+                        "❌ AI智能下注开关设置失败",
+                        summary=f"配置写入失败：{str(e)[:80]}",
+                        action="正确用法：`aib [on/off]`，例如 `aib on`。",
+                    )
+            else:
+                mes = _build_ops_card(
+                    "❌ AI智能下注开关设置失败",
+                    summary="当前参数数量或格式不正确。",
+                    action="正确用法：`aib [on/off]`，例如 `aib on`。",
+                )
+            message = await send_to_admin(client, mes, user_ctx, global_config)
+            asyncio.create_task(delete_later(client, event.chat_id, event.id, 10))
+            if message:
+                asyncio.create_task(delete_later(client, message.chat_id, message.id, 20))
             return
 
         if cmd == "mfb":
