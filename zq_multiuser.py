@@ -8409,8 +8409,10 @@ async def process_user_command(client, event, user_ctx: UserContext, global_conf
             else:
                 # 查看所有预设
                 if len(presets) > 0:
-                    max_key_length = max(len(str(k)) for k in presets.keys())
-                    preset_lines = "\n".join(f"'{k.ljust(max_key_length)}': {v}" for k, v in presets.items())
+                    preset_lines = "\n".join(
+                        f"• {escape_html(str(k))}: {escape_html(str(v))}"
+                        for k, v in presets.items()
+                    )
                     mes = f"📚 当前预设列表\n\n{preset_lines}"
                     log_event(logging.INFO, 'user_cmd', '查看预设', user_id=user_ctx.user_id)
                 else:
